@@ -144,6 +144,9 @@ public final class SharedMemory implements AutoCloseable {
     public Seqlock bl2StateLock() { return new Seqlock(buf, Proto.OFF_BL2_STATE); }
     public Seqlock mcStateLock() { return new Seqlock(buf, Proto.OFF_MC_STATE); }
     public Seqlock actorTableLock() { return new Seqlock(buf, Proto.OFF_ACTOR_TABLE); }
+    public Seqlock poseLock() { return new Seqlock(buf, Proto.OFF_POSE); }
+    public Seqlock hudLock() { return new Seqlock(buf, Proto.OFF_HUD); }
+    public Seqlock blockTableLock() { return new Seqlock(buf, Proto.OFF_BLOCKS); }
 
     // ---- SPSC rings ---------------------------------------------------------------------------
     /** Single-producer single-consumer ring of fixed-size records (SkyCraft scheme). */
@@ -188,6 +191,28 @@ public final class SharedMemory implements AutoCloseable {
     public Ring inputRing() { return new Ring(buf, Proto.OFF_INPUT_RING, Proto.INPUT_RING_ENTRIES, Proto.INPUT_ENTRY_BYTES); }
     public Ring collisionRing() { return new Ring(buf, Proto.OFF_COLLISION_RING, Proto.COLLISION_RING_ENTRIES, Proto.COLLISION_REC_BYTES); }
     public Ring eventRing() { return new Ring(buf, Proto.OFF_EVENT_RING, Proto.EVENT_RING_ENTRIES, Proto.EVENT_ENTRY_BYTES); }
+
+    /** BL2 -> MC events (damage on the player, pawn deaths). The event ring only runs MC -> BL2. */
+    public Ring bl2EventRing() {
+        return new Ring(buf, Proto.OFF_BL2_EVENT_RING, Proto.BL2_EVENT_RING_ENTRIES, Proto.EVENT_ENTRY_BYTES);
+    }
+
+    /** Push one 0x20-byte event record onto {@code ring}. */
+    public static boolean pushEvent(Ring ring, ByteBuffer scratch, int type, int flags, int actorId,
+                                    float a, float b, float c, float x, float y, float z) {
+        scratch.clear();
+        scratch.putShort((short) type);
+        scratch.putShort((short) flags);
+        scratch.putInt(actorId);
+        scratch.putFloat(a);
+        scratch.putFloat(b);
+        scratch.putFloat(c);
+        scratch.putFloat(x);
+        scratch.putFloat(y);
+        scratch.putFloat(z);
+        scratch.position(0);
+        return ring.push(scratch);
+    }
 
     // ---- overlay double buffer ---------------------------------------------------------------
     // byteBufferViewVarHandle takes the *array* class for the view: int[].class, not int.class

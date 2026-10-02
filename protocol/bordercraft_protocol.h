@@ -15,7 +15,9 @@
 namespace bordercraft::proto
 {
 	inline constexpr std::uint32_t kMagic = 0x54464342;  // "BCFT"
-	inline constexpr std::uint32_t kVersion = 1;
+	// v2 appends the gameplay regions (player pose, HUD/inventory, placed-block mirror) after
+	// the overlay pixels. Every v1 offset is unchanged, so only the new regions are additive.
+	inline constexpr std::uint32_t kVersion = 2;
 
 	// Named-mapping upgrade path (Windows). v1 transport is a file-backed mapping both sides
 	// open at the same path (see docs/DESIGN.md, "Transport").
@@ -43,7 +45,15 @@ namespace bordercraft::proto
 	inline constexpr std::uint32_t kMaxOverlayH = 1080;
 	inline constexpr std::uint64_t kOverlaySlotBytes = std::uint64_t(kMaxOverlayW) * kMaxOverlayH * 4;
 	inline constexpr std::uint32_t kOverlaySlots = 2;
-	inline constexpr std::uint64_t kMappingBytes = kOffOverlayPixels + kOverlaySlotBytes * kOverlaySlots;
+	// v2 gameplay regions, appended after the overlay pixels (0x1452000).
+	inline constexpr std::uint64_t kOffPose = 0x1452000;    // MC -> BL2, seqlock, 0x100 bytes
+	inline constexpr std::uint64_t kOffHud = 0x1452100;     // MC -> BL2, seqlock, HudState
+	inline constexpr std::uint64_t kOffBlocks = 0x1453000;  // MC -> BL2, seqlock, BlockTable
+	// BL2 -> MC events (the event ring at kOffEventRing only runs MC -> BL2). This is how a
+	// bandit's bullet becomes real damage on the Minecraft player.
+	inline constexpr std::uint64_t kOffBl2EventRing = 0x1460000;
+	inline constexpr std::uint32_t kBl2EventRingEntries = 4096;
+	inline constexpr std::uint64_t kMappingBytes = 0x1490000;
 
 	// ---- header @0x0 ------------------------------------------------------------------------
 	struct Header
@@ -192,10 +202,13 @@ namespace bordercraft::proto
 		kFocusLost = 7,   // MC should release all held keys
 	};
 
+	// `code` is a GLFW key code (kKeyDown/kKeyUp) or a GLFW mouse button (kMouseDown/kMouseUp),
+	// because that is the namespace Minecraft's own key bindings live in: the Fabric side can
+	// hand the event straight to KeyBinding without a second translation table.
 	struct InputEntry  // 16 bytes
 	{
 		std::uint16_t type;     // InputType
-		std::uint16_t code;     // key code / button
+		std::uint16_t code;     // GLFW key code / mouse button
 		std::int32_t  value;
 		std::int32_t  aux;
 		std::uint32_t timeMs;   // low 32 bits of producer's monotonic ms
@@ -300,4 +313,123 @@ namespace bordercraft::proto
 		float         x, y, z;
 	};
 	static_assert(sizeof(McEvent) == 0x20);
+
+	// ---- player pose @0x1452000 (MC -> BL2, seqlock) ---------------------------------------
+	// Everything BL2 needs to pose the real 3D Minecraft player model: Minecraft computes the
+	// animation inputs (it owns the physics), BL2 only evaluates the vanilla biped rig from them.
+	enum PoseFlags : std::uint32_t
+	{
+		kPoseSlim = 1u << 0,      // 3px arms (Alex model)
+		kPoseSneaking = 1u << 1,
+		kPoseSwimming = 1u << 2,
+		kPoseSprinting = 1u << 3,
+		kPoseUsingItem = 1u << 4,
+		kPoseMainHandLeft = 1u << 5,
+		kPoseOnGround = 1u << 6,
+		kPoseInvisible = 1u << 7,
+	};
+
+	struct PoseState
+	{
+		std::uint32_t seq;
+		std::uint32_t flags;        // PoseFlags
+		float bodyYaw;              // degrees, interpolated
+		float headYaw;              // degrees, absolute (head.yaw = headYaw - bodyYaw)
+		float headPitch;            // degrees, positive looks down (Minecraft convention)
+		float limbSwing;            // LimbAnimator position (drives the biped walk cycle)
+		float limbSwingAmount;      // 0..1 walk amplitude
+		float handSwing;            // 0..1 main-hand swing progress
+		float sneakAmount;          // 0..1 crouch blend
+		float leanAngle;            // degrees of forward lean (swimming / elytra / crawling)
+		float scale;                // model scale multiplier (1.0 normally)
+		float velX, velY, velZ;     // blocks per tick, for secondary motion on the BL2 side
+		std::uint32_t heldMainRgb;  // 0x00RRGGBB of the main-hand item (0 = empty)
+		std::uint32_t heldOffRgb;
+		float fallDistance;
+		float hurtTime;             // 0..1 red damage tint
+		std::uint32_t reserved[8];
+	};
+	static_assert(sizeof(PoseState) <= 0x100);
+
+	// ---- HUD + inventory @0x1452100 (MC -> BL2, seqlock) -----------------------------------
+	// Minecraft owns the inventory; this is a read-only projection so BL2 can draw the real
+	// Minecraft HUD (hearts, armor, hunger, XP, hotbar) and inventory grid over Pandora.
+	inline constexpr std::uint32_t kHudSlots = 46;       // 0-8 hotbar, 9-35 main, 36-39 armor, 40 offhand
+	inline constexpr std::uint32_t kHudNameBytes = 24;   // UTF-8, NUL padded
+
+	enum HudFlags : std::uint32_t
+	{
+		kHudScreenOpen = 1u << 0,     // an MC GUI (inventory/chest/crafting) is open
+		kHudInventoryOpen = 1u << 1,  // that screen is the player inventory
+		kHudCreative = 1u << 2,
+		kHudHardcore = 1u << 3,
+		kHudUnderwater = 1u << 4,
+	};
+
+	enum SlotFlags : std::uint16_t
+	{
+		kSlotSelected = 1u << 0,
+		kSlotEnchanted = 1u << 1,
+		kSlotBlock = 1u << 2,   // item places a block; rgb is its Minecraft map color
+		kSlotDamaged = 1u << 3,
+	};
+
+	struct HudSlot  // 0x20 bytes
+	{
+		std::uint32_t itemHash;   // stable hash of the registry id (0 = empty)
+		std::uint16_t count;
+		std::uint16_t flags;      // SlotFlags
+		std::uint32_t rgb;        // 0x00RRGGBB swatch color
+		std::uint16_t damage;     // 0..1000 fraction of durability used
+		std::uint16_t pad;
+		char          name[kHudNameBytes];
+	};
+	static_assert(sizeof(HudSlot) == 0x28);
+
+	struct HudState
+	{
+		std::uint32_t seq;
+		std::uint32_t flags;        // HudFlags
+		float health, maxHealth, absorption;
+		float armor, food, saturation, air, maxAir;
+		std::uint32_t xpLevel;
+		float         xpProgress;   // 0..1
+		std::uint32_t selectedSlot; // 0..8
+		std::uint32_t slotCount;    // <= kHudSlots
+		std::uint32_t reserved[2];  // pads the header to exactly 0x40 bytes
+		HudSlot       slots[kHudSlots];
+	};
+	static_assert(sizeof(HudState) == 0x40 + 0x28 * kHudSlots);
+	static_assert(sizeof(HudState) <= 0xF00);
+
+	// ---- placed blocks @0x1453000 (MC -> BL2, seqlock) -------------------------------------
+	// Blocks the player placed in the mirror world near the camera, so BL2 can draw them as
+	// real 3D cubes in Pandora. Minecraft stays authoritative: this is a render-only mirror.
+	inline constexpr std::uint32_t kMaxBlocks = 2048;
+
+	enum BlockEntryFlags : std::uint8_t
+	{
+		kBlockTranslucent = 1u << 0,
+		kBlockEmissive = 1u << 1,
+		kBlockFullCube = 1u << 2,
+	};
+
+	struct BlockEntry  // 0x10 bytes
+	{
+		std::int32_t  x, y, z;   // block position, MC coords
+		std::uint8_t  r, g, b;   // Minecraft map color
+		std::uint8_t  flags;     // BlockEntryFlags
+	};
+	static_assert(sizeof(BlockEntry) == 0x10);
+
+	struct BlockTable
+	{
+		std::uint32_t seq;
+		std::uint32_t count;
+		std::uint32_t worldId;
+		std::uint32_t revision;  // bumps whenever the set changes
+		std::uint8_t  reserved[0x40 - 0x10];
+		BlockEntry    entries[kMaxBlocks];
+	};
+	static_assert(sizeof(BlockTable) == 0x40 + 0x10 * kMaxBlocks);
 }

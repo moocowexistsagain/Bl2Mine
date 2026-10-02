@@ -109,6 +109,22 @@ then run completely unchanged.
 
 Data streams as deltas per section over the collision ring; MC evicts far sections.
 
+**How it reaches Minecraft's physics (MC side).** Exactly one injection, and it is deliberately the
+smallest one that can work: a `@ModifyVariable` on the static
+`Entity.adjustMovementForCollisions(Entity, Vec3d, Box, World, List<VoxelShape>)` that appends
+Pandora's shapes to the list Minecraft is about to solve against. Everything that makes Minecraft
+movement feel like Minecraft — gravity, the 0.6 step-up, sprint jumping, sneaking at an edge,
+slab-height precision — is then Mojang's unmodified code running against Pandora's geometry. The
+mixin is listed under the common `mixins` key (not `client`) so the integrated server applies it
+too, and it is declared `require = 0`: if a future mapping change stops it applying, the result is
+"no Pandora collision" rather than a crash. That would otherwise be a silent failure, so
+`CollisionField.mixinActive` records whether the handler has ever run and the bridge logs an
+explicit error if collision data is arriving but the mixin never fires.
+
+These shapes are deliberately **not** blocks. The mirror world stays a void world the player can
+build in freely, and Pandora's geometry sits alongside the blocks they place rather than
+overwriting them — which also keeps the block mirror's scan clean.
+
 ### 5.2 Water
 
 BL2 water volumes around the player stream into `WaterGrid`; a Mixin reports `water` inside those
@@ -128,39 +144,78 @@ cells and MC's swimming physics applies unchanged.
    (MC vertical ↔ UE3 horizontal), view bob applied. In v1 the MC overlay is composited over the
    BL2 frame, so the two views must match exactly.
 
-**v1 shortcut (Phase 1a):** keep BL2's own movement authoritative and slave MC's player+camera to
-the BL2 pawn. That alone yields "Minecraft graphics moving through Pandora"; the authority flips to
-MC in Phase 1b (the real SkyCraft-style loop).
+**v1 shortcut (Phase 1a, now superseded):** keep BL2's own movement authoritative and slave MC's
+player+camera to the BL2 pawn. **Shipped behaviour is the Phase 1b loop:** Minecraft is
+authoritative, `GameAdapter.set_physics_authority` puts the BL2 pawn into `PHYS_Custom` with
+`IgnoreMoveInput`/`IgnoreLookInput` set, and `move_puppet`/`camera_from` drive it from McState
+every tick. **F6** hands authority back to Borderlands 2 at any time.
 
 ## 7. Rendering
 
-- **Phase 1a native-free slice (implemented):** MC reads the authenticated player's 64×64 GPU skin
-  into BGRA and sends it through the shared-memory overlay double buffer. BL2 caches that payload
-  and draws a wide/slim pixel-art paper doll with UE3 Canvas rectangles. It is always visible,
-  its limbs animate from BL2 pawn movement, and F5 toggles a third-person projection over the
-  controlled BL2 pawn; no arbitrary UE3 texture upload is needed.
-- **Phase 1a full composite (blocked):** MC renders its world (and hand + HUD) offscreen each frame.
-  A native D3D9 helper must upload the BGRA frame because no supported willow2-sdk API for creating
-  an arbitrary runtime UE3 texture has been established.
-- **Phase 3 — native draw (stretch):** BL2 renders MC geometry itself (debug-draw boxes per visible
-  voxel face, or batched meshes) so blocks take Pandora's lighting. This is where SkyCraft's
-  "Minecraft lights light up Skyrim" fidelity lives; it's the last milestone, not the first.
+The hard constraint: **no supported willow2-sdk API creates a runtime UE3 texture.** Everything
+below follows from that one fact. Instead of uploading pixels, BorderCraft ships a software
+rasterizer in Python (`bl2sdk/BorderCraft/raster.py`) and blits its output as run-length-coalesced
+spans through `Canvas.SetDrawColor` + `DrawRect`. The budget is therefore *rectangles per frame*,
+not pixels, and every renderer below is written against that budget.
+
+- **The player (`model3d.py`, implemented).** The real Minecraft model: the same six boxes, the
+  same 64×64 skin unwrap, both overlay layers, wide and slim arms. Model space is right-handed,
+  16 units to a block, `+X` to the player's right, `+Y` up with the feet at `y=0`, and the model
+  facing `−Z`. Minecraft's own model space is this rotated 180° about Z, so a vanilla
+  `(pitch, yaw, roll)` applies as `rotation_matrix(-pitch, -yaw, roll)`, and because Minecraft's
+  yaw grows clockwise from south the camera orbit is `180 − body_yaw`. Animation is vanilla's:
+  `cos(limbSwing · 0.6662) · 1.4 · amount` legs, half that on the arms in antiphase, the ±75° head
+  clamp, the sneak crouch, and `sin((1−(1−swing)³)·π)` for the hand swing. Rasterization is
+  amortized over frames and cached against a quantized `pose_key()` (yaw to 6°, limb swing to ½,
+  and so on), so a standing player costs nothing and a walking one re-renders a few faces a frame.
+- **Placed blocks (`voxel.py`, implemented).** The block table is drawn as real 3D cubes: painter
+  sorted far-to-near, back-face culled, faces buried between two blocks dropped, scanline-filled
+  into horizontal Canvas bands, with Minecraft's own face shading (top 1.0, north/south 0.8,
+  east/west 0.6, bottom 0.5) and a hard rectangle cap.
+- **The HUD and inventory (`hud.py`, implemented).** Hearts, hunger, armour, absorption, air, the
+  XP bar and level, the hotbar and the full 41-slot inventory. Items cannot be read out of
+  Minecraft's atlas, so each slot crosses the bridge as a colour (a block's `MapColor`, or a
+  rarity-biased hash of its registry id), a count, a damage fraction and a name; blocks are drawn
+  as 16-rectangle isometric cubes and everything else as a tinted tile with text.
+- **Full-frame composite (still blocked, and now optional).** Compositing Minecraft's *entire*
+  rendered frame would still need a native D3D9 helper to upload a BGRA buffer. With the three
+  renderers above that is a fidelity upgrade rather than a prerequisite.
 
 ## 8. Input
 
-BL2 owns the window. The **InputBridge** hooks raw key/mouse events and forwards most of them
-through the input ring; the Fabric mod replays them as if the MC window had focus. Keys BL2 keeps:
-**Esc** (menu), **Tab** (map), **F** (action skill), **~** (console), **Alt-F4**-class system keys.
-On BL2 menus (`kBl2MenuOpen`) or alt-tab (`kFocusLost`), MC releases all held keys.
+BL2 owns the window. The **InputBridge** (`bl2sdk/BorderCraft/inputmap.py`) hooks
+`WillowPlayerController.InputKey`, translates UE3 key names into **GLFW codes** — Minecraft's own
+namespace, so the Fabric side needs no second translation table — and pushes them through the input
+ring. Mouse look is accumulated sub-pixel and forwarded as whole counts. Keys BL2 keeps:
+**Esc** (menu), **Tab** (map), **F** (action skill), **~** (console), **F5/F6/F7** (BorderCraft's
+own toggles), **Alt-F4**-class system keys.
+
+`InputReplayer` on the Fabric side replays them into `KeyBinding.setKeyPressed` /
+`KeyBinding.onKeyPressed` against an `InputUtil.Key`, which is exactly the state a focused window
+would have set — so vanilla's own `handleInputEvents` performs the attack, the use, the hotbar
+switch and continuous mining with no reimplementation. Mouse look becomes
+`Entity#changeLookDirection`; the wheel becomes `PlayerInventory#scrollInHotbar`. When a Minecraft
+screen is open, keys and clicks are routed to the `Screen` instead, against a virtual cursor driven
+by the same mouse deltas. On BL2 menus (`kBl2MenuOpen`) or alt-tab (`kFocusLost`), every key the
+bridge is holding is released — tracked per key, so nothing else is disturbed.
 
 ## 9. Combat
 
-- MC weapons damage BL2 pawns through the ActorProxy: the Fabric mod hooks melee/projectile hits on
-  proxy entities and emits `kEvtPlayerHitActor`; BL2's **HitBridge** applies real damage
-  (scaled to the pawn's level, like SkyCraft does) via the SDK.
-- BL2 pawns fight back: their attacks on the puppet emit `kEvtActorHitPlayer`, MC calls
-  `player.hurt()` with a synthetic `bordercraft:bl2_gun`/`bl2_explosion` damage source. MC's
-  armor, hearts and death/respawn flow are untouched.
+**The scaling rule, in both directions: damage crosses the bridge as a fraction of a 20-point
+Minecraft health pool.** That is what keeps a diamond sword meaningful against a level 5 skag and
+a level 50 badass without rewriting either game's combat maths.
+
+- **MC → BL2.** Spawning a custom entity per pawn was rejected: registering an `EntityType` against
+  a moving mapping surface is a liability for no gain. Instead `ActorMirror` keeps the pawn AABBs
+  from the actor table and `DamageBridge` raycasts the crosshair against them, using Minecraft's
+  own numbers — `GENERIC_ATTACK_DAMAGE`, the 1.9 cooldown ramp (`0.2 + p² · 0.8`) and the vanilla
+  crit test — and emits `kEvtPlayerHitActor`. `GameAdapter.damage_actor` scales that into the
+  pawn's health pool and calls `TakeDamage`, doubling on a crit.
+- **BL2 → MC.** The MC→BL2 event ring is one-way, so v2 added a second ring at `kOffBl2EventRing`.
+  `poll_player_damage` diffs the pawn's health each tick and pushes `kEvtBl2DamagePlayer` with a
+  `kDamage*` kind; the Fabric side applies it to the *server* copy of the player with a real
+  `DamageSource`, so armour, enchantments, absorption, the hurt tilt and the death screen are all
+  vanilla behaviour.
 - `kEvtApproachActor` implements BL2's "use" key near a pawn/terminal (talk, loot, press).
 
 ## 10. Progression
@@ -186,11 +241,11 @@ through the shared page cache. Phase 2 swaps in the named mapping `Local\BorderC
 | Phase | Deliverable | Status |
 |---|---|---|
 | **0** | Protocol + bridges handshake; calibration test for coords/rotators | ✅ protocol + `tools/protocol_selftest.py` (all channels, cross-process) |
-| **1a** | Visible MC avatar; eventual overlay composite (BL2 movement) | 🔶 Authenticated skin GPU readback, tagged overlay transport, wide/slim UE3 Canvas paper doll, PostRender hooks and BL2-movement animation are implemented and statically tested. Two-game runtime verification remains. Full Minecraft-world compositing still needs a native UE3/D3D9 uploader. |
-| **1b** | MC physics authoritative; PlayerPuppet; input bridge | scaffolded |
-| **2** | CollisionField (Stage A traces), ActorMirror, combat both ways, water | protocol ready, exporters stubbed |
+| **1a** | Visible MC avatar; eventual overlay composite (BL2 movement) | ✅ Authenticated skin GPU readback, tagged overlay transport and UE3 Canvas drawing, all statically tested. Superseded by the 3D model below. |
+| **1b** | MC physics authoritative; PlayerPuppet; input bridge | ✅ `PhysicsBridge` publishes McState with tick-interpolation endpoints; `GameAdapter.move_puppet`/`camera_from` slave the BL2 pawn and camera to it; `InputBridge` → `InputReplayer` replays UE3 key names as GLFW codes into Minecraft's `KeyBinding` state, including mouse look and GUI screens. |
+| **2** | CollisionField (Stage A traces), ActorMirror, combat both ways, water | ✅ `CollisionExporter` traces heightfield sections and `EntityCollisionMixin` feeds them to Minecraft's solver; `ActorMirror` + `DamageBridge` run combat both ways. Water is flagged (`kColWater`) but buoyancy is not wired up. |
 | **2.5** | Named-mapping transport, packaging, UX polish | 🔶 BL2 `.sdkmod` + legacy ZIP packaging is available; named mapping and UX polish remain |
-| **3** | Native voxel rendering in BL2, block place/break carved into BL2 meshes (stretch) | future |
+| **3** | Native voxel rendering in BL2, block place/break carved into BL2 meshes (stretch) | 🔶 The player and placed blocks are rendered as real 3D geometry by the Python rasterizer. Carving into Pandora's own meshes, and Pandora lighting the blocks, remain stretch goals that need the native path. |
 
 ## 13. Known limitations (v1)
 
@@ -198,6 +253,15 @@ through the shared page cache. Phase 2 swaps in the named mapping `Local\BorderC
   double buffer never blocks either game.
 - BL2's UI (inventory, skills, map) is still BL2's; MC's inventory is the gameplay inventory
   (SkyCraft makes the same split).
+- The overlay is a rectangle budget, not a framebuffer: roughly 250-520 rectangles for the avatar,
+  up to 420 for blocks and ~900-1200 for the HUD. Item icons are flat colours and isometric cubes
+  rather than Minecraft's own sprites, because reading the item atlas would need the native path.
+- While a Minecraft screen is open, clicks are delivered to it at a virtual cursor; Minecraft's own
+  hover highlight follows the real OS cursor, which cannot be moved for an unfocused window.
+- `kColWater` is exported and the `WaterGrid` region exists, but buoyancy is not wired up yet: the
+  collision field simply skips water columns instead of making them swimmable.
+- The block mirror is a rolling scan of a 33x33 column region around the player, so a block placed
+  far away (or by a command) can take up to about a second to appear in Pandora.
 - Multiplayer: BL2 co-op clients without BorderCraft see a normal (puppeted) player. Full co-op
   sync is out of scope until single-player is solid.
 

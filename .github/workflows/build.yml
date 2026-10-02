@@ -25,8 +25,14 @@ jobs:
           python tools/protocol_selftest.py
           python tools/test_bridge_lifecycle.py
           python tools/test_host_adapter.py
-          python tools/test_skin_renderer.py
+          python tools/test_compositor.py
+          python tools/test_model_renderer.py
+          python tools/test_voxel_field.py
+          python tools/test_hud_renderer.py
+          python tools/test_input_bridge.py
+          python tools/test_collision_export.py
           python tools/mirror_check.py
+          python tools/package_bl2.py --output-dir "${RUNNER_TEMP}/bordercraft-package"
           python -m compileall -q bl2sdk protocol/python tools
 
       - name: Set up Java 21

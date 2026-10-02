@@ -60,6 +60,8 @@ class FakeBridge:
         self.overlay = FakeOverlay()
         self.states = []
         self.heartbeats = []
+        self.inputs = []
+        self.bl2_events = []
         self.heartbeat_seen = threading.Event()
 
     def heartbeat(self, side):
@@ -78,6 +80,23 @@ class FakeBridge:
     def read_mc_state(self):
         return None
 
+    def push_input(self, entry):
+        self.inputs.append(entry)
+        return True
+
+    def push_bl2_event(self, event):
+        self.bl2_events.append(event)
+        return True
+
+    def read_pose(self):
+        return None
+
+    def read_hud(self):
+        return None
+
+    def read_blocks(self):
+        return None
+
     def pop_event(self):
         return None
 
@@ -87,6 +106,7 @@ class FakeGame:
         self.map_id = 0xCAFE
         self.is_paused = False
         self.skin_world_view = False
+        self.physics_authority = False
 
     def player_feet_mc(self):
         return (1.0, 2.0, 3.0)
@@ -131,6 +151,22 @@ class FakeGame:
 
     def avatar_screen_bounds(self, _canvas):
         return (400.0, 500.0, 256.0) if self.skin_world_view else None
+
+    def set_physics_authority(self, enabled):
+        self.physics_authority = bool(enabled)
+        return True
+
+    def poll_player_damage(self):
+        return []
+
+    def tracer(self):
+        return None
+
+    def player_health(self):
+        return (100.0, 100.0)
+
+    def read_mouse_delta(self):
+        return (0.0, 0.0)
 
 
 class GameAdapterTests(unittest.TestCase):
