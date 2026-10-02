@@ -181,7 +181,7 @@ through the shared page cache. Phase 2 swaps in the named mapping `Local\BorderC
 | Phase | Deliverable | Status |
 |---|---|---|
 | **0** | Protocol + bridges handshake; calibration test for coords/rotators | ✅ protocol + `tools/protocol_selftest.py` (all channels, cross-process) |
-| **1a** | Overlay composite; MC player+camera slaved to BL2 pawn (BL2 movement) | 🔶 overlay pipeline protocol-tested (`Overlay.publish/acquire`); Minecraft capture is wired to the post-HUD render callback but GL readback needs in-game verification; UE3 fullscreen blit and pawn/camera slave are still unimplemented |
+| **1a** | Overlay composite; MC player+camera slaved to BL2 pawn (BL2 movement) | 🔶 BL2 exports live pawn/look/map/pause/viewport/time state on the engine thread; overlay pipeline is protocol-tested (`Overlay.publish/acquire`); Minecraft capture is wired to the post-HUD render callback but GL readback needs in-game verification; UE3 fullscreen blit and MC pawn/camera slave are still unimplemented |
 | **1b** | MC physics authoritative; PlayerPuppet; input bridge | scaffolded |
 | **2** | CollisionField (Stage A traces), ActorMirror, combat both ways, water | protocol ready, exporters stubbed |
 | **2.5** | Named-mapping transport, packaging, UX polish | 🔶 BL2 `.sdkmod` + legacy ZIP packaging is available; named mapping and UX polish remain |
