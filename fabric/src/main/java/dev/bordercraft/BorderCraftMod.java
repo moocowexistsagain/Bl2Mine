@@ -54,6 +54,8 @@ public class BorderCraftMod implements ClientModInitializer {
 
     private long frames = 0;
     private long lastOpenAttempt = 0;
+    private int openFailures = 0;
+    private String lastOpenError;
     private boolean wasDead = false;
     private boolean warnedAboutMixin = false;
     private boolean menuWasOpen = false;
@@ -175,8 +177,8 @@ public class BorderCraftMod implements ClientModInitializer {
             return false;   // BL2 is not up: retry once a second, not twenty times
         }
         lastOpenAttempt = now;
+        Path path = SharedMemory.defaultPath();
         try {
-            Path path = SharedMemory.defaultPath();
             sm = SharedMemory.open(path);
             sm.writeHeader(0, (int) ProcessHandle.current().pid());
             skinPublisher = new SkinPublisher(sm);
@@ -188,10 +190,32 @@ public class BorderCraftMod implements ClientModInitializer {
             actors = new ActorMirror(sm);
             damage = new DamageBridge(sm, actors);
             LOG.info("BorderCraft: bridge open at {}", path);
+            openFailures = 0;
+            lastOpenError = null;
             return true;
         } catch (Exception e) {
             sm = null;
+            reportOpenFailure(path, e);
             return false;
         }
+    }
+
+    /**
+     * A failed open must never be silent: a stale BL2 package (old mapping size or protocol
+     * version) otherwise looks exactly like a healthy, quiet Minecraft log while the bridge
+     * never connects. Log the first failure and every change of reason immediately, then once
+     * a minute while the same failure repeats.
+     */
+    private void reportOpenFailure(Path path, Exception e) {
+        String reason = e.getMessage();
+        if (reason == null || reason.isEmpty()) {
+            reason = e.getClass().getSimpleName();
+        }
+        openFailures++;
+        if (openFailures == 1 || !reason.equals(lastOpenError) || openFailures % 60 == 0) {
+            LOG.warn("BorderCraft: bridge not ready at {}: {} (attempt {}, retrying every second)",
+                    path, reason, openFailures);
+        }
+        lastOpenError = reason;
     }
 }

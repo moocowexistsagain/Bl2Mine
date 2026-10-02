@@ -51,17 +51,22 @@ jobs:
       - name: Check built jar bytecode
         run: python tools/jar_check.py fabric/build/libs/bordercraft-0.1.0.jar
 
-      # Keep release/ usable for people who install from the repository without a JDK. Commits
-      # made by GITHUB_TOKEN do not recursively trigger this workflow.
-      - name: Refresh prebuilt jar on Arena branches
+      # Keep release/ usable for people who install from the repository without a JDK, and keep
+      # the BL2 packages in lockstep with the protocol source - a stale package on either side
+      # leaves the bridge silent. Commits made by GITHUB_TOKEN do not recursively trigger this
+      # workflow.
+      - name: Refresh prebuilt artifacts on Arena branches
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/arena/')
         run: |
           cp fabric/build/libs/bordercraft-0.1.0.jar release/bordercraft-0.1.0.jar
+          cp "${RUNNER_TEMP}/bordercraft-package/BorderCraft.sdkmod" release/BorderCraft.sdkmod
+          rm -f release/BorderCraft-*-legacy.zip
+          cp "${RUNNER_TEMP}"/bordercraft-package/BorderCraft-*-legacy.zip release/
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add release/bordercraft-0.1.0.jar
+          git add release/
           if ! git diff --cached --quiet; then
-            git commit -m "Update prebuilt Fabric jar"
+            git commit -m "Update prebuilt BorderCraft artifacts"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
 
