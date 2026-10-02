@@ -70,11 +70,33 @@ You own both games: **Borderlands 2 (PC)** and **Minecraft Java Edition**. The B
 | No MODS menu in BL2 | Python SDK didn't install into the game folder — the zip must merge so `sdk_mods\` sits next to `Binaries\`. Re-extract. |
 | MODS menu has no BorderCraft | Check that `BorderCraft.sdkmod` is directly in `sdk_mods\` (do not unzip it). For the legacy ZIP, extract its single `BorderCraft` folder directly into `sdk_mods\`; avoid double nesting. Restart the game after installing. |
 | BL2 log reports a Python import error | Reinstall the complete `.sdkmod` or legacy ZIP from `release/`; both packages include the protocol module. |
+| BL2 log says `could not start bridge` with `[Errno 22] Invalid argument` | Replace the BL2 package with the current `release\BorderCraft.sdkmod` (or legacy ZIP) and restart BL2. Older packages always truncated `bridge.mm`, which Windows rejects if Minecraft still maps it. See **Windows bridge startup errors** below if it persists. |
 | MC log says `bad magic` / `protocol version` | Stale bridge from an older build: close both games, delete `%LOCALAPPDATA%\BorderCraft\bridge.mm`, start again. |
 | MC log shows nothing about BorderCraft | The jar isn't in `mods\`, or you launched a non-Fabric profile. |
 | MC crashes on startup | Check `latest.log` — if it's a mod conflict, try with only Fabric API + BorderCraft in `mods\`. |
 | MC crashes on startup with `ExceptionInInitializerError ... not an array: int` (or a `WrongMethodTypeException` mentioning `SharedMemory`) | You have a broken pre-fix `bordercraft-0.1.0.jar`. Delete it and copy the current `release\bordercraft-0.1.0.jar` (same filename, fixed contents) into `mods\`. |
 | Wrong Minecraft version | The jar is for 1.21.1. For another version: edit `fabric/gradle.properties`, run `gradlew build` (needs JDK 21), replace the jar. |
+
+### Windows bridge startup errors
+
+The fixed BL2 packages keep the same filenames/version. Replace your installed package, rather
+than just downloading it. No Minecraft jar update is required for this bridge-creation fix.
+A correctly sized `bridge.mm` is now reused without truncating or deleting it; old bridge data is
+cleared through the mapping before the new header is published.
+
+If startup still fails, the BL2 log now identifies the failing operation (opening, resizing,
+mapping, etc.). For a **resizing** failure, a different-sized bridge from an older build may still
+be mapped:
+
+1. Close **both games**. In Task Manager, check for leftover `Borderlands2.exe`, `javaw.exe` or
+   `python.exe` processes **belonging to BorderCraft/the games**, and close those too.
+2. Only after those processes have exited, delete `%LOCALAPPDATA%\BorderCraft\bridge.mm`.
+3. Restart the games and enable BorderCraft again.
+
+Do not delete the file while either game is running. For an **opening** or **mapping** failure
+that persists with both games closed, check that `%LOCALAPPDATA%\BorderCraft` is a valid, writable
+folder and that security software is not blocking access. Include the complete new error line
+when reporting it; `Invalid argument` alone does not prove a stale process is responsible.
 
 ## Uninstall
 

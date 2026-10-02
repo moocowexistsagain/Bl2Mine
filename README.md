@@ -83,6 +83,9 @@ yourself: `cd fabric && ./gradlew build` (JDK 21).
 # protocol self-test (no games required)
 python3 tools/protocol_selftest.py
 
+# bridge lifecycle regression tests (includes Windows mapped-file / EINVAL failures)
+python3 tools/test_bridge_lifecycle.py
+
 # package the BL2 mod as BorderCraft.sdkmod + legacy folder ZIP
 python3 tools/package_bl2.py
 
