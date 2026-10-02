@@ -73,6 +73,7 @@ You own both games: **Borderlands 2 (PC)** and **Minecraft Java Edition**. The B
 | MC log says `bad magic` / `protocol version` | Stale bridge from an older build: close both games, delete `%LOCALAPPDATA%\BorderCraft\bridge.mm`, start again. |
 | MC log shows nothing about BorderCraft | The jar isn't in `mods\`, or you launched a non-Fabric profile. |
 | MC crashes on startup | Check `latest.log` — if it's a mod conflict, try with only Fabric API + BorderCraft in `mods\`. |
+| MC crashes on startup with `ExceptionInInitializerError ... not an array: int` (or a `WrongMethodTypeException` mentioning `SharedMemory`) | You have a broken pre-fix `bordercraft-0.1.0.jar`. Delete it and copy the current `release\bordercraft-0.1.0.jar` (same filename, fixed contents) into `mods\`. |
 | Wrong Minecraft version | The jar is for 1.21.1. For another version: edit `fabric/gradle.properties`, run `gradlew build` (needs JDK 21), replace the jar. |
 
 ## Uninstall

@@ -44,8 +44,14 @@ public final class SharedMemory implements AutoCloseable {
     /** Open an existing mapping. Minecraft side. */
     public static SharedMemory open(Path path) throws IOException {
         try (RandomAccessFile f = new RandomAccessFile(path.toFile(), "rw")) {
+            long size = f.length();
+            // BL2 truncates the file to the full size before it writes the magic header, so a
+            // short or half-created bridge is a retryable error here - never a crash mid-tick.
+            if (size < Proto.MAPPING_BYTES) {
+                throw new IOException("bridge too small: " + size + " < " + Proto.MAPPING_BYTES);
+            }
             FileChannel ch = f.getChannel();
-            ByteBuffer buf = ch.map(FileChannel.MapMode.READ_WRITE, 0, f.length());
+            ByteBuffer buf = ch.map(FileChannel.MapMode.READ_WRITE, 0, size);
             SharedMemory sm = new SharedMemory(buf.order(ByteOrder.LITTLE_ENDIAN), ch);
             int magic = sm.buf.getInt((int) Proto.OFF_HEADER);
             int version = sm.buf.getInt((int) Proto.OFF_HEADER + 4);
@@ -184,8 +190,14 @@ public final class SharedMemory implements AutoCloseable {
     public Ring eventRing() { return new Ring(buf, Proto.OFF_EVENT_RING, Proto.EVENT_RING_ENTRIES, Proto.EVENT_ENTRY_BYTES); }
 
     // ---- overlay double buffer ---------------------------------------------------------------
+    // byteBufferViewVarHandle takes the *array* class for the view: int[].class, not int.class
+    // (a primitive class is not an array, which throws in the static initializer and takes the
+    // whole mod down on the first tick). The index is a byte offset and the call site must be
+    // exactly (ByteBuffer, int): passing Proto.OFF_OVERLAY_CTL as a long makes every access
+    // throw WrongMethodTypeException at runtime, so narrow it once here.
     private static final VarHandle STATE =
-            MethodHandles.byteBufferViewVarHandle(int.class, ByteOrder.LITTLE_ENDIAN);
+            MethodHandles.byteBufferViewVarHandle(int[].class, ByteOrder.LITTLE_ENDIAN);
+    private static final int OVERLAY_CTL_OFF = (int) Proto.OFF_OVERLAY_CTL;
 
     /** Frame double buffer (SkyCraft scheme): writer publishes into back slot, reader takes newest. */
     public static final class Overlay {
@@ -218,7 +230,7 @@ public final class SharedMemory implements AutoCloseable {
             int pos = bgra.position();
             for (int i = 0; i < need; i++) buf.put(px + i, bgra.get(pos + i));
             buf.putLong(hdr + 0x10, frames); // ready marker, written last
-            int old = (int) STATE.getAndSet(buf, Proto.OFF_OVERLAY_CTL, slot | Proto.OVERLAY_DIRTY);
+            int old = (int) STATE.getAndSet(buf, OVERLAY_CTL_OFF, slot | Proto.OVERLAY_DIRTY);
             int newBack = old & 0x3;
             back = (newBack != slot && newBack < Proto.OVERLAY_SLOTS) ? newBack : (slot + 1) % Proto.OVERLAY_SLOTS;
             return frames;
@@ -226,7 +238,7 @@ public final class SharedMemory implements AutoCloseable {
 
         /** Reader: newest unpublished frame into {@code out}; returns frame id, or -1. */
         public long acquire(ByteBuffer out, int[] whFlags) {
-            int state = (int) STATE.getVolatile(buf, Proto.OFF_OVERLAY_CTL);
+            int state = (int) STATE.getVolatile(buf, OVERLAY_CTL_OFF);
             if ((state & Proto.OVERLAY_DIRTY) == 0) return -1;
             int slot = state & 0x3;
             if (slot >= Proto.OVERLAY_SLOTS) return -1;
@@ -234,15 +246,15 @@ public final class SharedMemory implements AutoCloseable {
             long fid = buf.getLong(hdr + 0x10);
             int w = buf.getInt(hdr), h = buf.getInt(hdr + 4), flags = buf.getInt(hdr + 8);
             if (fid == 0 || w == 0 || h == 0) {
-                STATE.setVolatile(buf, Proto.OFF_OVERLAY_CTL, state & ~Proto.OVERLAY_DIRTY);
+                STATE.setVolatile(buf, OVERLAY_CTL_OFF, state & ~Proto.OVERLAY_DIRTY);
                 return -1;
             }
             int need = w * h * 4;
             int px = px(slot);
             for (int i = 0; i < need; i++) out.put(i, buf.get(px + i));
             if (buf.getLong(hdr + 0x10) != fid) return -1; // raced a rewrite
-            if ((int) STATE.getVolatile(buf, Proto.OFF_OVERLAY_CTL) == state) {
-                STATE.setVolatile(buf, Proto.OFF_OVERLAY_CTL, slot);
+            if ((int) STATE.getVolatile(buf, OVERLAY_CTL_OFF) == state) {
+                STATE.setVolatile(buf, OVERLAY_CTL_OFF, slot);
             }
             whFlags[0] = w;
             whFlags[1] = h;
