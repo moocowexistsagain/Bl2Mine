@@ -4,10 +4,10 @@ You own both games: **Borderlands 2 (PC)** and **Minecraft Java Edition**. The B
 `release/` is ready to install, and the prebuilt Minecraft jar targets **Minecraft 1.21.1** (Fabric).
 ~10 minutes.
 
-> **What this install gets you:** the "hello bridge" milestone — both mods load, the two real
-> game processes connect over the shared memory, and you can watch them handshake. The
-> gameplay composite (Minecraft drawn inside the Borderlands window) is Phase 1a and is not
-> visible yet. Backup your saves anyway.
+> **What this install gets you:** a visible, controllable first slice. Open both games and a
+> Minecraft world; your active Minecraft skin appears as a pixel-art avatar at the lower-right of
+> Borderlands 2. Move normally in BL2 and its limbs animate with your pawn. This is not yet the full
+> Minecraft-physics/block/combat bridge. Backup your saves anyway.
 
 ---
 
@@ -58,10 +58,19 @@ You own both games: **Borderlands 2 (PC)** and **Minecraft Java Edition**. The B
 
 ## Expected result
 
-- BL2: MODS menu shows BorderCraft, enabled, no errors; `bridge.mm` in `%LOCALAPPDATA%\BorderCraft\`.
-- Minecraft: `BorderCraft: bridge open at ...` in the log.
-- In-game: nothing visual yet (the frame composite is the next milestone) — this install proves
-  the foundation.
+1. Keep Minecraft open in a world, then load a BL2 save (either game may be started first).
+2. BL2's MODS menu shows BorderCraft enabled and `bridge.mm` exists in
+   `%LOCALAPPDATA%\BorderCraft\`.
+3. Minecraft's log shows `BorderCraft: bridge open at ...`, followed by
+   `BorderCraft: published player skin ...` after the world loads.
+4. Your Minecraft skin appears at the lower-right of the BL2 viewport. Walk in BL2 with its normal
+   controls and the avatar's arms/legs swing. Wide (Steve) and slim (Alex) arm layouts are handled.
+5. Press **F5** in gameplay to toggle the controllable world view. BorderCraft switches BL2 to third
+   person, hides the normal pawn mesh where supported, and projects your pixel-art skin over the
+   pawn as you move through Pandora. Press **F5** again to return to first person/HUD-doll mode.
+
+This slice deliberately uses BL2 movement and a Canvas paper doll. Minecraft-authoritative movement,
+3D world geometry, inventory, block interaction and combat are not implemented yet.
 
 ## Troubleshooting
 
@@ -73,6 +82,9 @@ You own both games: **Borderlands 2 (PC)** and **Minecraft Java Edition**. The B
 | BL2 log says `could not start bridge` with `[Errno 22] Invalid argument` | Replace the BL2 package with the current `release\BorderCraft.sdkmod` (or legacy ZIP) and restart BL2. Older packages always truncated `bridge.mm`, which Windows rejects if Minecraft still maps it. See **Windows bridge startup errors** below if it persists. |
 | MC log says `bad magic` / `protocol version` | Stale bridge from an older build: close both games, delete `%LOCALAPPDATA%\BorderCraft\bridge.mm`, start again. |
 | MC log shows nothing about BorderCraft | The jar isn't in `mods\`, or you launched a non-Fabric profile. |
+| Bridge opens but no skin appears | Keep an MC world loaded (not just the title screen), verify the `published player skin` log line, and replace both BorderCraft packages with the current files in `release\`. |
+| Skin is Steve/Alex instead of your account skin | Minecraft has not downloaded your authenticated skin yet. Confirm the launcher is online and signed into the intended account; leave the world open for a few seconds while BorderCraft retries. |
+| Skin appears but does not move around the world | Expected in this slice: it is a lower-right paper doll whose limbs track BL2 movement. In-world 3D replacement is a later milestone. |
 | MC crashes on startup | Check `latest.log` — if it's a mod conflict, try with only Fabric API + BorderCraft in `mods\`. |
 | MC crashes on startup with `ExceptionInInitializerError ... not an array: int` (or a `WrongMethodTypeException` mentioning `SharedMemory`) | You have a broken pre-fix `bordercraft-0.1.0.jar`. Delete it and copy the current `release\bordercraft-0.1.0.jar` (same filename, fixed contents) into `mods\`. |
 | Wrong Minecraft version | The jar is for 1.21.1. For another version: edit `fabric/gradle.properties`, run `gradlew build` (needs JDK 21), replace the jar. |

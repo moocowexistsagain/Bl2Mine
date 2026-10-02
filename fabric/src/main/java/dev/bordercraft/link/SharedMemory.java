@@ -210,8 +210,8 @@ public final class SharedMemory implements AutoCloseable {
         private int hdr(int slot) { return (int) (Proto.OFF_OVERLAY_SLOT_HDR + slot * 0x40L); }
         private int px(int slot) { return (int) (Proto.OFF_OVERLAY_PIXELS + slot * Proto.OVERLAY_SLOT_BYTES); }
 
-        /** Writer: copy one BGRA frame into the back slot and publish. Returns the frame id. */
-        public long publish(int w, int h, ByteBuffer bgra, boolean bottomUp) {
+        /** Writer: copy one BGRA payload into the back slot and publish. Returns its frame id. */
+        public long publish(int w, int h, ByteBuffer bgra, int flags) {
             if (w <= 0 || h <= 0 || w > Proto.MAX_OVERLAY_W || h > Proto.MAX_OVERLAY_H) {
                 throw new IllegalArgumentException("bad overlay size " + w + "x" + h);
             }
@@ -224,7 +224,7 @@ public final class SharedMemory implements AutoCloseable {
             int hdr = hdr(slot);
             buf.putInt(hdr, w);
             buf.putInt(hdr + 4, h);
-            buf.putInt(hdr + 8, bottomUp ? 1 : 0);
+            buf.putInt(hdr + 8, flags);
             buf.putInt(hdr + 12, 0);
             int px = px(slot);
             int pos = bgra.position();

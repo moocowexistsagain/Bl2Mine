@@ -63,7 +63,12 @@ public final class Proto {
     public static final int MC_SWIMMING = 1 << 6;
     public static final int MC_FLYING = 1 << 7;
 
+    // OverlayCtl.state flag.
     public static final int OVERLAY_DIRTY = 1 << 2;
+    // Overlay slot payload flags (a separate field from the control word above).
+    public static final int OVERLAY_BOTTOM_UP = 0x1;
+    public static final int OVERLAY_SKIN = 0x2;
+    public static final int OVERLAY_SLIM = 0x4;
 
     public static final int COL_WALKABLE = 1 << 0;
     public static final int COL_WATER = 1 << 1;

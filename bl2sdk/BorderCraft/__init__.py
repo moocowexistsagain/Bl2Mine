@@ -88,6 +88,10 @@ def _stop_bridge() -> None:
     _runner = _thread = _bridge = None
 
     if runner is not None:
+        try:
+            runner.on_mod_disable()
+        except Exception as exc:
+            _log("error restoring avatar view: " + repr(exc))
         runner.stop()
     if thread is not None and thread.is_alive():
         thread.join(timeout=2.0)
@@ -131,11 +135,17 @@ if unrealsdk is not None:
                     "BorderCraft_Input",
                     self._on_input,
                 )
+                unrealsdk.RegisterHook(
+                    "WillowGame.WillowGameViewportClient.PostRender",
+                    "BorderCraft_RenderSkin",
+                    self._on_post_render,
+                )
 
             def Disable(self):
                 for function, hook_id in (
                     ("WillowGame.WillowPlayerController.PlayerTick", "BorderCraft_Tick"),
                     ("WillowGame.WillowPlayerController.InputKey", "BorderCraft_Input"),
+                    ("WillowGame.WillowGameViewportClient.PostRender", "BorderCraft_RenderSkin"),
                 ):
                     try:
                         unrealsdk.RemoveHook(function, hook_id)
@@ -153,6 +163,11 @@ if unrealsdk is not None:
                     _runner.on_input(params)
                 return True
 
+            def _on_post_render(self, caller, function, params):
+                if _runner is not None:
+                    _runner.on_post_render(getattr(params, "Canvas", None))
+                return True
+
         ModMenu.RegisterMod(BorderCraft())
     else:
         # Current willow2-sdk hooks are registered with the mod and only run while it is enabled.
@@ -165,6 +180,11 @@ if unrealsdk is not None:
         def _on_input(caller, params, ret, function):
             if _runner is not None:
                 _runner.on_input(params)
+
+        @hook("WillowGame.WillowGameViewportClient:PostRender", Type.POST)
+        def _on_post_render(caller, params, ret, function):
+            if _runner is not None:
+                _runner.on_post_render(getattr(params, "Canvas", None))
 
         def on_enable() -> None:
             _start_bridge()

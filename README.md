@@ -13,11 +13,12 @@ Borderlands 2's window.
 > ("play Skyrim as a Minecraft player") — same bridge architecture, but the host game is
 > Borderlands 2 and you *are* a Minecraft character inside it.
 
-> **Status: early scaffolding.** The shared-memory protocol is done and tested. The BL2 side is
-> packaged as a menu-registered willow2-sdk mod (current `mods_base` API, with a legacy fallback),
-> but the game adapters and Minecraft gameplay bridge are still scaffolding. Expect rough edges.
-> This is a fan project. It isn't affiliated with Gearbox, 2K, Mojang or Microsoft, and you need
-> to own both games.
+> **Status: first playable visual slice.** Run both games, open a Minecraft world, and your active
+> 64x64 Minecraft skin appears as a crisp pixel-art avatar in Borderlands 2. You keep normal BL2
+> movement controls; the avatar's limbs animate as your BL2 pawn moves, and **F5** toggles a
+> third-person view projected over the controlled pawn. Minecraft-authoritative
+> physics, blocks, inventory and combat remain later milestones. Expect rough edges. This is a fan
+> project; it isn't affiliated with Gearbox, 2K, Mojang or Microsoft, and you need to own both games.
 
 ## How it works
 
@@ -86,8 +87,9 @@ python3 tools/protocol_selftest.py
 # bridge lifecycle regression tests (includes Windows mapped-file / EINVAL failures)
 python3 tools/test_bridge_lifecycle.py
 
-# BL2 adapter tests (live pawn/map state conversion + game-thread safety; no game needed)
+# BL2 adapter + skin renderer tests (no game needed)
 python3 tools/test_host_adapter.py
+python3 tools/test_skin_renderer.py
 
 # package the BL2 mod as BorderCraft.sdkmod + legacy folder ZIP
 python3 tools/package_bl2.py
@@ -107,23 +109,24 @@ python3 tools/jar_check.py
 ## Roadmap (short version — details in docs/DESIGN.md)
 
 1. ✅ **Phase 0** — shared-memory protocol + self-test (handshake, states, rings, teleport).
-2. 🔶 **Phase 1a** — draw Minecraft's frames inside BL2's window. BL2 now publishes its live pawn,
-   look, map, pause/loading, viewport and time-dilation state from the engine thread. The overlay
-   double buffer is protocol-tested and Minecraft publishes after its in-world HUD render. GL
-   readback still needs in-game verification; MC camera slaving and the UE3 fullscreen blit remain.
+2. 🔶 **Phase 1a** — the working native-free slice publishes the authenticated 64x64 skin through
+   the overlay buffer and renders it in BL2 through UE3 Canvas. The paper doll supports wide/slim
+   arms and movement animation. Fullscreen Minecraft-world compositing still needs a native D3D9
+   texture uploader; final PostRender/skin-readback behavior needs verification in the two games.
 3. **Phase 1b** — Minecraft physics authoritative (SkyCraft-style puppet loop) + input bridge.
 4. **Phase 2** — Pandora collision into MC physics, NPC proxies, combat both ways, water.
 5. **Phase 3** — native voxel rendering and digging into Pandora's meshes (stretch).
 
-## Controls (planned)
+## Controls
 
-| Key | Does |
+| Key | Current skin-avatar slice |
 |---|---|
-| **Esc** | BL2 menu |
-| **Tab** | BL2 map |
-| **F** | BL2 action skill |
-| **~** | BL2 console |
-| everything else | Minecraft (WASD, Space, Shift, E, 1-9, mouse, T, F5, ...) |
+| **BL2 movement/look controls** | Control the pawn and animate the Minecraft skin |
+| **F5** | Toggle projected third-person skin view / first-person HUD doll |
+| **Esc / Tab / F / ~** | BL2 menu / map / action skill / console |
+
+Forwarding the remaining controls to Minecraft (WASD, Space, Shift, E, mouse, inventory, and so on)
+starts in Phase 1b, after Pandora collision is available to Minecraft physics.
 
 ## Credits
 

@@ -1,8 +1,8 @@
 // BorderCraft — Fabric mod entrypoint (Minecraft side of the bridge).
 //
-// Runs hidden next to Borderlands 2. Each client tick it publishes McState, consumes Bl2State and
-// drains the input/event/collision channels; the in-world HUD callback publishes rendered frames.
-// Gameplay pieces (PhysicsInjector, InputReplayer, ActorProxy, HudMirror) are stubs at this stage —
+// Runs next to Borderlands 2. Each client tick it publishes McState, consumes Bl2State, drains the
+// input/event/collision channels, and periodically publishes the authenticated player's 64x64 skin.
+// Gameplay pieces (PhysicsInjector, InputReplayer, ActorProxy, HudMirror) are later milestones —
 // see docs/DESIGN.md for what each becomes.
 package dev.bordercraft;
 
@@ -10,7 +10,6 @@ import dev.bordercraft.link.Proto;
 import dev.bordercraft.link.SharedMemory;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -23,18 +22,13 @@ public class BorderCraftMod implements ClientModInitializer {
 
     private SharedMemory sm;
     private final ByteBuffer scratch = ByteBuffer.allocate(Proto.COLLISION_REC_BYTES);
-    private OverlayPublisher publisher;
+    private SkinPublisher skinPublisher;
     private long frames = 0;
 
     @Override
     public void onInitializeClient() {
         LOG.info("BorderCraft: starting bridge client");
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
-        HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
-            if (publisher != null) {
-                publisher.publishFrame(net.minecraft.client.MinecraftClient.getInstance());
-            }
-        });
     }
 
     private void tick(net.minecraft.client.MinecraftClient client) {
@@ -44,17 +38,22 @@ public class BorderCraftMod implements ClientModInitializer {
 
         sm.heartbeat(false);
         frames++;
+        skinPublisher.publishIfDue(client);
 
         // --- consume BL2 -> MC -------------------------------------------------------------
         SharedMemory.Seqlock lock = sm.bl2StateLock();
         int seq = lock.tryRead();
-        if (seq >= 0 && lock.readOk(seq)) {
+        if (seq >= 0) {
+            // Copy every field needed by this tick before validating the seqlock. Never validate
+            // first and then read: BL2 could begin a new write between those two operations.
             int flags = sm.buf.getInt((int) (Proto.OFF_BL2_STATE + Proto.BL2_OFF_FLAGS));
-            if ((flags & Proto.BL2_MENU_OPEN) != 0) {
-                // TODO(InputReplayer): release all held MC keys
-            }
             int teleportSeq = sm.buf.getInt((int) (Proto.OFF_BL2_STATE + Proto.BL2_OFF_TELEPORT_SEQ));
-            // TODO(PhysicsInjector): apply teleport + feed CollisionField; ack in McState
+            if (lock.readOk(seq)) {
+                if ((flags & Proto.BL2_MENU_OPEN) != 0) {
+                    // TODO(InputReplayer): release all held MC keys
+                }
+                // TODO(PhysicsInjector): apply teleport + feed CollisionField; ack in McState
+            }
         }
 
         // collision ring -> CollisionField (consumer side)
@@ -98,7 +97,7 @@ public class BorderCraftMod implements ClientModInitializer {
             Path path = SharedMemory.defaultPath();
             sm = SharedMemory.open(path);
             sm.writeHeader(0, (int) ProcessHandle.current().pid());
-            publisher = new OverlayPublisher(sm);
+            skinPublisher = new SkinPublisher(sm);
             LOG.info("BorderCraft: bridge open at {}", path);
             return true;
         } catch (Exception e) {

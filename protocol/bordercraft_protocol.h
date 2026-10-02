@@ -135,7 +135,14 @@ namespace bordercraft::proto
 	// xchg(state, back | kDirty) and keeps the returned index as its new back slot. Reader (BL2)
 	// does xchg(state, front) only when the dirty bit is set and keeps the returned index as its
 	// new front slot.
+	// OverlayCtl::state flag (this lives in the control word, not OverlaySlotHdr::flags).
 	inline constexpr std::uint32_t kOverlayDirty = 1u << 2;
+
+	// OverlaySlotHdr::flags. Phase 1a sends the authenticated player's skin rather than a
+	// fullscreen readback: the BL2 Canvas renderer can display this without a native D3D9 upload.
+	inline constexpr std::uint32_t kOverlayBottomUp = 1u << 0;
+	inline constexpr std::uint32_t kOverlaySkin = 1u << 1;
+	inline constexpr std::uint32_t kOverlaySlim = 1u << 2;
 
 	struct OverlayCtl
 	{
@@ -148,7 +155,7 @@ namespace bordercraft::proto
 	{
 		std::uint32_t width;
 		std::uint32_t height;
-		std::uint32_t flags;  // bit0: rows are bottom-up
+		std::uint32_t flags;  // OverlaySlotFlags: bottom-up rows / skin payload / slim arms
 		std::uint32_t pad;
 		std::uint64_t frameId;
 		std::uint8_t  reserved[0x40 - 0x18];

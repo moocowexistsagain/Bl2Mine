@@ -134,9 +134,14 @@ MC in Phase 1b (the real SkyCraft-style loop).
 
 ## 7. Rendering
 
-- **Phase 1 — overlay composite:** MC renders its world (and hand + HUD) offscreen each frame into
-  the shared-memory **overlay double buffer** (BGRA, up to 1920×1080). BL2 draws the latest slot as
-  a fullscreen texture over its own frame (UE3 canvas / transient texture). Fast to ship, works.
+- **Phase 1a native-free slice (implemented):** MC reads the authenticated player's 64×64 GPU skin
+  into BGRA and sends it through the shared-memory overlay double buffer. BL2 caches that payload
+  and draws a wide/slim pixel-art paper doll with UE3 Canvas rectangles. It is always visible,
+  its limbs animate from BL2 pawn movement, and F5 toggles a third-person projection over the
+  controlled BL2 pawn; no arbitrary UE3 texture upload is needed.
+- **Phase 1a full composite (blocked):** MC renders its world (and hand + HUD) offscreen each frame.
+  A native D3D9 helper must upload the BGRA frame because no supported willow2-sdk API for creating
+  an arbitrary runtime UE3 texture has been established.
 - **Phase 3 — native draw (stretch):** BL2 renders MC geometry itself (debug-draw boxes per visible
   voxel face, or batched meshes) so blocks take Pandora's lighting. This is where SkyCraft's
   "Minecraft lights light up Skyrim" fidelity lives; it's the last milestone, not the first.
@@ -181,7 +186,7 @@ through the shared page cache. Phase 2 swaps in the named mapping `Local\BorderC
 | Phase | Deliverable | Status |
 |---|---|---|
 | **0** | Protocol + bridges handshake; calibration test for coords/rotators | ✅ protocol + `tools/protocol_selftest.py` (all channels, cross-process) |
-| **1a** | Overlay composite; MC player+camera slaved to BL2 pawn (BL2 movement) | 🔶 BL2 exports live pawn/look/map/pause/viewport/time state on the engine thread; overlay pipeline is protocol-tested (`Overlay.publish/acquire`); Minecraft capture is wired to the post-HUD render callback but GL readback needs in-game verification; UE3 fullscreen blit and MC pawn/camera slave are still unimplemented |
+| **1a** | Visible MC avatar; eventual overlay composite (BL2 movement) | 🔶 Authenticated skin GPU readback, tagged overlay transport, wide/slim UE3 Canvas paper doll, PostRender hooks and BL2-movement animation are implemented and statically tested. Two-game runtime verification remains. Full Minecraft-world compositing still needs a native UE3/D3D9 uploader. |
 | **1b** | MC physics authoritative; PlayerPuppet; input bridge | scaffolded |
 | **2** | CollisionField (Stage A traces), ActorMirror, combat both ways, water | protocol ready, exporters stubbed |
 | **2.5** | Named-mapping transport, packaging, UX polish | 🔶 BL2 `.sdkmod` + legacy ZIP packaging is available; named mapping and UX polish remain |

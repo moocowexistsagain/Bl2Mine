@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MOD_SOURCE = ROOT / "bl2sdk" / "BorderCraft"
 PROTOCOL_SOURCE = ROOT / "protocol" / "python" / "bordercraft_protocol.py"
 MOD_NAME = "BorderCraft"
+# ZIP's portable timestamp floor. Fixed metadata makes release archives byte-for-byte reproducible.
+ARCHIVE_DATE = (1980, 1, 1, 0, 0, 0)
 REQUIRED_FILES = (
     "__init__.py",
     "host.py",
@@ -53,16 +55,29 @@ def stage_package(stage: Path) -> None:
         compile(source.read_bytes(), str(source), "exec")
 
 
+def _archive_info(name: str, directory: bool = False) -> zipfile.ZipInfo:
+    info = zipfile.ZipInfo(name, ARCHIVE_DATE)
+    info.create_system = 3  # Unix permissions, even when packaging on Windows.
+    info.compress_type = zipfile.ZIP_STORED if directory else zipfile.ZIP_DEFLATED
+    info.external_attr = ((0o40755 if directory else 0o100644) << 16) | (0x10 if directory else 0)
+    return info
+
+
 def write_archive(output: Path, stage: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         # The current willow2 SDK requires a .sdkmod archive to have exactly one root folder,
         # named the same as the archive stem. The same layout also makes a conventional ZIP easy
-        # to extract into sdk_mods/.
-        archive.writestr(f"{MOD_NAME}/", b"")
+        # to extract into sdk_mods/. Use fixed timestamps and permissions so two builds are equal.
+        archive.writestr(_archive_info(f"{MOD_NAME}/", directory=True), b"")
         for source in sorted(stage.iterdir()):
             if source.is_file():
-                archive.write(source, f"{MOD_NAME}/{source.name}")
+                archive.writestr(
+                    _archive_info(f"{MOD_NAME}/{source.name}"),
+                    source.read_bytes(),
+                    compress_type=zipfile.ZIP_DEFLATED,
+                    compresslevel=9,
+                )
 
     validate_archive(output)
 
