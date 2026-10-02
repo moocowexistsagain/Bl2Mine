@@ -401,48 +401,79 @@ class Bridge:
     def create(cls, path: Optional[str] = None, retries: int = 50) -> "Bridge":
         """Create (or take over) the mapping and write the header. BL2 side.
 
-        On Windows the file can come up partially visible (antivirus, cloud-folder sync, a
-        stale process still mapping it). We verify the size after mapping and retry rather
-        than publishing a broken bridge. The header (magic) is written last, so consumers
-        only see the bridge once it is real.
+        Never open an existing bridge with a truncating mode: Windows can report EINVAL
+        (ERROR_USER_MAPPED_FILE) when Minecraft still maps it. Reuse a correctly sized file
+        in place, and resize only when necessary. Reset all shared data before publishing
+        the magic so old ring counters, states and overlay frames do not survive a restart.
         """
-        path = path or default_mapping_path()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if retries < 1:
+            raise ValueError("retries must be at least 1")
+        path = os.fspath(path or default_mapping_path())
         last: Exception | None = None
-        for _ in range(retries):
+        operation = "creating bridge directory"
+        for attempt in range(retries):
+            buf = None
             try:
-                f = open(path, "w+b")
-            except OSError as e:  # PermissionError: a stale process still maps the file
-                last = e
-                time.sleep(0.1)
-                continue
-            try:
-                f.truncate(MAPPING_BYTES)
-                buf = mmap.mmap(f.fileno(), MAPPING_BYTES)
-            except (OSError, ValueError) as e:
-                f.close()
-                last = e
-                time.sleep(0.1)
-                continue
-            f.close()
-            size = os.path.getsize(path)
-            if size < MAPPING_BYTES:
-                buf.close()
+                operation = "creating bridge directory"
+                directory = os.path.dirname(path)
+                if directory:
+                    os.makedirs(directory, exist_ok=True)
+
+                operation = "opening bridge file without truncation"
                 try:
-                    os.remove(path)
-                except OSError:
-                    pass
-                last = RuntimeError(f"bridge file came up {size} bytes, expected {MAPPING_BYTES}")
+                    f = open(path, "r+b")
+                except FileNotFoundError:
+                    # Exclusive creation avoids truncating a file that appeared after r+b
+                    # failed. If another process won that race, retry and reopen it instead.
+                    f = open(path, "x+b")
+                with f:
+                    operation = "checking bridge file size"
+                    size = os.fstat(f.fileno()).st_size
+                    if size != MAPPING_BYTES:
+                        operation = f"resizing bridge file from {size} to {MAPPING_BYTES} bytes"
+                        f.truncate(MAPPING_BYTES)
+                        f.flush()
+
+                    operation = "checking bridge file size"
+                    size = os.fstat(f.fileno()).st_size
+                    if size != MAPPING_BYTES:
+                        raise RuntimeError(f"bridge file came up {size} bytes, expected {MAPPING_BYTES}")
+                    operation = f"mapping {MAPPING_BYTES} bytes"
+                    buf = mmap.mmap(f.fileno(), MAPPING_BYTES, access=mmap.ACCESS_WRITE)
+
+                operation = "resetting bridge memory"
+                struct.pack_into("<I", buf, OFF_HEADER, 0)  # invalidate any previous header first
+                # BL2 is a 32-bit process; avoid allocating another full ~21 MB buffer to clear it.
+                zeros = b"\x00" * 65536
+                for offset in range(0, MAPPING_BYTES, len(zeros)):
+                    end = min(offset + len(zeros), MAPPING_BYTES)
+                    buf[offset:end] = zeros[:end - offset]
+                br = cls(buf, path)
+                operation = "initializing bridge header"
+                struct.pack_into(_HDR_FMT, buf, OFF_HEADER, 0, VERSION, os.getpid(), 0, monotonic_ms(), 0)
+                struct.pack_into("<I", buf, OFF_HEADER, MAGIC)  # publish only after initialization
+                buf = None  # ownership passes to br; failed attempts are closed below
+                return br
+            except (OSError, ValueError, RuntimeError) as e:
+                last = e
+            finally:
+                if buf is not None:
+                    buf.close()
+            if attempt + 1 < retries:
                 time.sleep(0.1)
-                continue
-            br = cls(buf, path)
-            struct.pack_into(_HDR_FMT, buf, OFF_HEADER, MAGIC, VERSION, os.getpid(), 0, monotonic_ms(), 0)
-            return br
-        raise RuntimeError(
-            f"could not create bridge at {path}: {last}\n"
-            "A stale process may still be mapping it (stray python.exe / javaw.exe / "
-            "Borderlands2.exe from a previous run) - close it or delete the file by hand."
-        )
+
+        if operation.startswith("resizing"):
+            hint = (
+                "Check that the bridge directory is writable. A different-sized bridge cannot "
+                "be resized while it is mapped on Windows. Close both games and any leftover "
+                "BorderCraft processes before deleting the bridge file, then restart."
+            )
+        else:
+            hint = (
+                "Check that the path is valid and the bridge directory is writable. If the file "
+                "is locked, close both games and any leftover BorderCraft processes, then retry."
+            )
+        raise RuntimeError(f"could not create bridge at {path} while {operation}: {last}\n{hint}") from last
 
     @classmethod
     def open(cls, path: Optional[str] = None) -> "Bridge":
