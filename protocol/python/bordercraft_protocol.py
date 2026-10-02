@@ -63,7 +63,12 @@ MC_DEAD = 1 << 5
 MC_SWIMMING = 1 << 6
 MC_FLYING = 1 << 7
 
+# OverlayCtl.state flag.
 OVERLAY_DIRTY = 1 << 2
+# Overlay slot payload flags (a separate field from the control word above).
+OVERLAY_BOTTOM_UP = 1 << 0
+OVERLAY_SKIN = 1 << 1
+OVERLAY_SLIM = 1 << 2
 
 COL_WALKABLE = 1 << 0
 COL_WATER = 1 << 1
@@ -334,8 +339,19 @@ class Overlay:
     def _set_state(self, v: int) -> None:
         struct.pack_into("<I", self.buf, OFF_OVERLAY_CTL, v & 0xFFFFFFFF)
 
-    def publish(self, w: int, h: int, pixels: bytes, bottom_up: bool = True) -> int:
-        """Writer: copy one BGRA frame into the back slot and publish it. Returns frame id."""
+    def publish(
+        self,
+        w: int,
+        h: int,
+        pixels: bytes,
+        bottom_up: bool = True,
+        flags: int = 0,
+    ) -> int:
+        """Publish one BGRA payload and return its frame id.
+
+        ``bottom_up`` is retained for callers that publish framebuffer pixels. Semantic payload
+        bits such as :data:`OVERLAY_SKIN` belong in ``flags``.
+        """
         if not (0 < w <= MAX_OVERLAY_W and 0 < h <= MAX_OVERLAY_H):
             raise ValueError(f"bad overlay size {w}x{h}")
         need = w * h * 4
@@ -344,7 +360,8 @@ class Overlay:
         slot = self._back
         self._frames += 1
         hdr = self._slot_hdr(slot)
-        struct.pack_into("<IIII", self.buf, hdr, w, h, 1 if bottom_up else 0, 0)
+        payload_flags = flags | (OVERLAY_BOTTOM_UP if bottom_up else 0)
+        struct.pack_into("<IIII", self.buf, hdr, w, h, payload_flags, 0)
         px = self._slot_px(slot)
         self.buf[px:px + need] = pixels
         struct.pack_into("<Q", self.buf, hdr + 0x10, self._frames)  # ready marker, written last

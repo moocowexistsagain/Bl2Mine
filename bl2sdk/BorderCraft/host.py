@@ -222,7 +222,14 @@ class BridgeRunner:
         self.publish_bl2_state()
         self.drain_events()
         if self.compositor:
-            self.compositor.on_engine_frame()  # pull Minecraft's latest frame (Phase 1a)
+            # The Minecraft skin stays visible in BL2 and its limbs respond to the actual BL2
+            # pawn movement. BL2 remains authoritative in this native-free Phase 1a slice.
+            self.compositor.on_engine_frame(self.game.player_feet_mc())
+
+    def on_post_render(self, canvas) -> None:
+        """Draw the cached Minecraft skin through UE3's supported Canvas API."""
+        if self.compositor:
+            self.compositor.on_post_render(canvas)
 
     def on_input(self, params) -> None:
         """Forward a raw input event to MC. BL2 keeps Esc/Tab/F/~."""
