@@ -1,0 +1,9 @@
+# Python bytecode and local test mappings
+__pycache__/
+*.py[cod]
+/tools/selftest.mm
+
+# Generated release staging / Fabric build outputs
+/dist/
+/fabric/.gradle/
+/fabric/build/

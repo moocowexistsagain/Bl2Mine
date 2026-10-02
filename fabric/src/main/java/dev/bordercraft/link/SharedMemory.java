@@ -18,10 +18,14 @@ import java.nio.file.Path;
 public final class SharedMemory implements AutoCloseable {
     public final ByteBuffer buf; // little-endian, direct
     private final FileChannel channel;
+    private final Overlay overlay;
 
     private SharedMemory(ByteBuffer buf, FileChannel channel) {
         this.buf = buf;
         this.channel = channel;
+        // Overlay owns writer-local slot/frame counters. Keep one instance for the lifetime
+        // of this mapping; returning a new Overlay on every accessor call restarts both at 0.
+        this.overlay = new Overlay(buf);
     }
 
     /** Create (or take over) the mapping and write the header. BL2 side does this. */
@@ -247,7 +251,7 @@ public final class SharedMemory implements AutoCloseable {
         }
     }
 
-    public Overlay overlay() { return new Overlay(buf); }
+    public Overlay overlay() { return overlay; }
 
     @Override
     public void close() throws IOException {

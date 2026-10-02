@@ -1,14 +1,16 @@
 // BorderCraft — Fabric mod entrypoint (Minecraft side of the bridge).
 //
 // Runs hidden next to Borderlands 2. Each client tick it publishes McState, consumes Bl2State and
-// drains the input/event/collision channels. The gameplay pieces (PhysicsInjector, InputReplayer,
-// ActorProxy, HudMirror) are stubs at this stage — see docs/DESIGN.md for what each becomes.
+// drains the input/event/collision channels; the in-world HUD callback publishes rendered frames.
+// Gameplay pieces (PhysicsInjector, InputReplayer, ActorProxy, HudMirror) are stubs at this stage —
+// see docs/DESIGN.md for what each becomes.
 package dev.bordercraft;
 
 import dev.bordercraft.link.Proto;
 import dev.bordercraft.link.SharedMemory;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,7 +29,12 @@ public class BorderCraftMod implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         LOG.info("BorderCraft: starting bridge client");
-        ClientTickEvents.END_CLIENT_TICK.register(client -> tick(client));
+        ClientTickEvents.END_CLIENT_TICK.register(this::tick);
+        HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
+            if (publisher != null) {
+                publisher.publishFrame(net.minecraft.client.MinecraftClient.getInstance());
+            }
+        });
     }
 
     private void tick(net.minecraft.client.MinecraftClient client) {
@@ -64,13 +71,6 @@ public class BorderCraftMod implements ClientModInitializer {
 
         // --- publish MC -> BL2 ---------------------------------------------------------------
         publishMcState(client);
-
-        // frame pipeline: capture this frame into the overlay double buffer.
-        // TODO(Phase 1a): ideally called from a render-event hook right after the frame is
-        // drawn; the tick hook is close enough for the first composite tests.
-        if (publisher != null) {
-            publisher.publishFrame(client);
-        }
 
         // event ring is produced by hooks (ActorProxy.hurt, block place/break, player death):
         // TODO(HitBridge): push McEvent records on combat/block events

@@ -13,8 +13,9 @@ Borderlands 2's window.
 > ("play Skyrim as a Minecraft player") — same bridge architecture, but the host game is
 > Borderlands 2 and you *are* a Minecraft character inside it.
 
-> **Status: early scaffolding.** The shared-memory protocol is done and tested; the two game mods
-> are skeletons that compile but don't yet sync a real game session. Expect rough edges.
+> **Status: early scaffolding.** The shared-memory protocol is done and tested. The BL2 side is
+> packaged as a menu-registered willow2-sdk mod (current `mods_base` API, with a legacy fallback),
+> but the game adapters and Minecraft gameplay bridge are still scaffolding. Expect rough edges.
 > This is a fan project. It isn't affiliated with Gearbox, 2K, Mojang or Microsoft, and you need
 > to own both games.
 
@@ -43,18 +44,19 @@ bordercraft/
 ├── protocol/
 │   ├── bordercraft_protocol.h        # single source of truth for the wire layout
 │   └── python/bordercraft_protocol.py  # Python mirror (BL2 side + tools)
-├── bl2sdk/BorderCraft/               # drop into Borderlands 2/sdk_mods/BorderCraft/
+├── bl2sdk/BorderCraft/               # BL2 SDK mod source (current + legacy API)
 ├── fabric/                           # Fabric mod (gradle project)
 ├── docs/DESIGN.md
 └── tools/
     ├── protocol_selftest.py          # cross-process protocol test (runs anywhere)
-    └── package.ps1                   # builds a release zip (stub)
+    └── package_bl2.py                # builds the installable BL2 SDK packages
 ```
 
 ## Requirements
 
-**Borderlands 2** (PC): [Python SDK (willow2-sdk)](https://bl-sdk.github.io/willow2-mod-db/) —
-extract into the game folder so you get a `sdk_mods/` folder and a MODS menu in-game.
+**Borderlands 2** (PC): the latest [willow2-sdk](https://bl-sdk.github.io/willow2-mod-db/).
+BorderCraft ships as `release/BorderCraft.sdkmod` for the current SDK, plus a legacy folder ZIP for
+older SDK installs.
 
 **Minecraft** (Java Edition): Fabric Loader + Fabric API. The version is pinned in
 `fabric/gradle.properties` — bump it to whatever you play.
@@ -63,9 +65,10 @@ extract into the game folder so you get a `sdk_mods/` folder and a MODS menu in-
 
 ➡️ **See [INSTALL.md](INSTALL.md)** — the full Windows guide. Short version:
 
-1. **BL2**: install the Python SDK (willow2-sdk) into the game folder, copy `bl2sdk/BorderCraft`
-   → `sdk_mods/BorderCraft/`, copy `protocol/python/bordercraft_protocol.py` into that folder
-   too, enable the mod in the in-game MODS menu.
+1. **BL2**: install the current willow2-sdk, copy `release/BorderCraft.sdkmod` into the game's
+   `sdk_mods/` folder, launch Borderlands 2, then enable **BorderCraft** in the MODS menu. For an
+   older SDK that predates `.sdkmod`, extract `release/BorderCraft-0.1.0-legacy.zip` into
+   `sdk_mods/` instead.
 2. **Minecraft** (1.21.1 + Fabric): drop Fabric API and the prebuilt **`release/bordercraft-0.1.0.jar`**
    into `mods/`, open a world. The log shows `BorderCraft: bridge open at ...` when the games
    are connected.
@@ -79,6 +82,9 @@ yourself: `cd fabric && ./gradlew build` (JDK 21).
 # protocol self-test (no games required)
 python3 tools/protocol_selftest.py
 
+# package the BL2 mod as BorderCraft.sdkmod + legacy folder ZIP
+python3 tools/package_bl2.py
+
 # Minecraft mod
 cd fabric && ./gradlew build        # jar in build/libs/
 
@@ -91,9 +97,9 @@ cd fabric && ./gradlew build        # jar in build/libs/
 ## Roadmap (short version — details in docs/DESIGN.md)
 
 1. ✅ **Phase 0** — shared-memory protocol + self-test (handshake, states, rings, teleport).
-2. 🔶 **Phase 1a** — draw Minecraft's frames inside BL2's window. The frame pipeline (overlay
-   double buffer, publisher/consumer) is **built and protocol-tested**; the two game-render
-   hooks (Minecraft framebuffer readback, UE3 fullscreen blit) are the remaining in-game work.
+2. 🔶 **Phase 1a** — draw Minecraft's frames inside BL2's window. The overlay double buffer is
+   protocol-tested; Minecraft now publishes after its in-world HUD render. GL readback still needs
+   in-game verification, and the UE3 fullscreen blit is not implemented yet.
 3. **Phase 1b** — Minecraft physics authoritative (SkyCraft-style puppet loop) + input bridge.
 4. **Phase 2** — Pandora collision into MC physics, NPC proxies, combat both ways, water.
 5. **Phase 3** — native voxel rendering and digging into Pandora's meshes (stretch).

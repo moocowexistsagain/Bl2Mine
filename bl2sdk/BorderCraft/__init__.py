@@ -1,94 +1,175 @@
-"""BorderCraft — Borderlands 2 Python SDK mod (the bridge host).
+"""BorderCraft — the Borderlands 2 side of the shared-memory bridge.
 
-Drop this folder into ``Borderlands 2/sdk_mods/BorderCraft/``. BL2 creates the shared mapping;
-the Minecraft Fabric mod opens it (see docs/DESIGN.md).
-
-This is a Phase-0/1 skeleton: the bridge, heartbeat, state publishing and event draining all
-work against the protocol; the calls into Unreal (puppet move, traces, damage) are stubbed in
-host.py and marked TODO. Imports of unrealsdk are guarded so the module can be imported (and its
-protocol logic tested) outside the game.
+This package supports both current willow2-sdk (``mods_base`` / ``build_mod``) and the older
+``Mods.ModMenu.SDKMod`` API. For an installable package, see ``release/bordercraft-0.1.0.sdkmod``.
 """
 from __future__ import annotations
 
 import os
 import sys
 import threading
-import time
 
-# Make the in-repo protocol mirror importable whether we're in sdk_mods/ or in the repo.
+# A .sdkmod package bundles this sibling module. The source checkout keeps the protocol in its
+# canonical location, protocol/python/, so add that path only for in-repo development.
 _HERE = os.path.dirname(os.path.abspath(__file__))
-for _p in (
-    os.path.join(_HERE, "..", "..", "protocol", "python"),   # repo layout
-    os.path.join(_HERE, "protocol"),                          # packaged layout
-):
-    if os.path.isdir(_p):
-        sys.path.insert(0, _p)
-
-import bordercraft_protocol as P  # noqa: E402
+try:
+    from . import bordercraft_protocol as P
+except ImportError:
+    _PROTOCOL_DIR = os.path.abspath(os.path.join(_HERE, "..", "..", "protocol", "python"))
+    if os.path.isdir(_PROTOCOL_DIR) and _PROTOCOL_DIR not in sys.path:
+        sys.path.insert(0, _PROTOCOL_DIR)
+    import bordercraft_protocol as P  # noqa: E402
 
 try:
     import unrealsdk  # type: ignore
-    from Mods import ModMenu  # type: ignore
-    IN_GAME = True
 except ImportError:
     unrealsdk = None
-    ModMenu = None
-    IN_GAME = False
 
 from . import host  # noqa: E402
 
-if IN_GAME:
+_bridge: P.Bridge | None = None
+_runner: host.BridgeRunner | None = None
+_thread: threading.Thread | None = None
 
-    class BorderCraft(ModMenu.SDKMod):
-        Name = "BorderCraft"
-        Author = "BorderCraft contributors"
-        Description = "Play Borderlands 2 as a Minecraft player. Bridges BL2 to a hidden Minecraft."
-        Version = "0.1.0"
-        Types = ModMenu.ModTypes.Gameplay
-        SaveEnabledState = ModMenu.EnabledSaveType.LoadWithSettings
 
-        def __init__(self):
-            self.bridge: P.Bridge | None = None
-            self.game = host.GameAdapter()
-            self.runner: host.BridgeRunner | None = None
-            self._thread: threading.Thread | None = None
+def _log(message: str) -> None:
+    if unrealsdk is None:
+        return
+    text = "[BorderCraft] " + message
+    try:
+        # willow2-sdk 3.x exposes the standard logging module; the legacy SDK uses Log().
+        from unrealsdk import logging
 
-        # -- lifecycle -------------------------------------------------------------------
-        def Enable(self):
-            self.bridge = P.Bridge.create()
-            self.bridge.write_header(bl2_pid=os.getpid())
-            self.runner = host.BridgeRunner(self.bridge, self.game)
-            self._thread = threading.Thread(target=self.runner.run, name="BorderCraft", daemon=True)
-            self._thread.start()
-            unrealsdk.RegisterHook("WillowGame.WillowPlayerController.PlayerTick",
-                                   "BorderCraft_Tick", self._on_tick)
-            unrealsdk.RegisterHook("WillowGame.WillowPlayerController.InputKey",
-                                   "BorderCraft_Input", self._on_input)
-            unrealsdk.Log("[BorderCraft] bridge up at " + self.bridge.path)
+        logging.info(text)
+    except (ImportError, AttributeError):
+        try:
+            unrealsdk.Log(text)
+        except Exception:
+            pass
 
-        def Disable(self):
+
+def _start_bridge() -> None:
+    """Start the bridge once when the mod is enabled."""
+    global _bridge, _runner, _thread
+    if _bridge is not None:
+        return
+
+    bridge = None
+    runner = None
+    thread = None
+    try:
+        bridge = P.Bridge.create()
+        bridge.write_header(bl2_pid=os.getpid())
+        runner = host.BridgeRunner(bridge, host.GameAdapter())
+        thread = threading.Thread(target=runner.run, name="BorderCraft", daemon=True)
+
+        # Publish before starting the worker so an engine callback always sees a complete session.
+        _bridge, _runner, _thread = bridge, runner, thread
+        thread.start()
+        _log("bridge up at " + bridge.path)
+    except Exception as exc:
+        if runner is not None:
+            runner.stop()
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=1.0)
+        if bridge is not None:
             try:
-                unrealsdk.RemoveHook("WillowGame.WillowPlayerController.PlayerTick", "BorderCraft_Tick")
-                unrealsdk.RemoveHook("WillowGame.WillowPlayerController.InputKey", "BorderCraft_Input")
+                bridge.close()
             except Exception:
                 pass
-            if self.runner:
-                self.runner.stop()
-            if self.bridge:
-                self.bridge.close()
-                self.bridge = None
-            unrealsdk.Log("[BorderCraft] bridge down")
+        _bridge = _runner = _thread = None
+        _log("could not start bridge: " + repr(exc))
 
-        # -- engine hooks -----------------------------------------------------------------
-        def _on_tick(self, caller, function, params):
-            if self.runner:
-                self.runner.on_engine_tick()
-            return True
 
-        def _on_input(self, caller, function, params):
-            # Forward raw key/mouse to MC (BL2 keeps Esc/Tab/F/~). See host.InputBridge.
-            if self.runner:
-                self.runner.on_input(params)
-            return True
+def _stop_bridge() -> None:
+    """Stop the worker before closing its shared mapping."""
+    global _bridge, _runner, _thread
+    runner, thread, bridge = _runner, _thread, _bridge
+    _runner = _thread = _bridge = None
 
-    ModMenu.RegisterMod(BorderCraft())
+    if runner is not None:
+        runner.stop()
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=2.0)
+    if bridge is not None:
+        try:
+            bridge.close()
+        except Exception as exc:
+            _log("error closing bridge: " + repr(exc))
+    _log("bridge down")
+
+
+if unrealsdk is not None:
+    try:
+        # Native API in willow2-sdk 3.x+. build_mod reads the display metadata from pyproject.toml
+        # and makes the hooks below follow the enabled state in the in-game Mods menu.
+        from mods_base import build_mod, hook
+        from unrealsdk.hooks import Type
+    except ImportError:
+        # Compatibility path for the original PythonSDK / willow2-sdk ModMenu API.
+        from Mods import ModMenu  # type: ignore
+
+        class BorderCraft(ModMenu.SDKMod):
+            Name = "BorderCraft"
+            Author = "BorderCraft contributors"
+            Description = (
+                "Bridge Borderlands 2 to Minecraft. Gameplay integration is under development."
+            )
+            Version = "0.1.0"
+            Types = ModMenu.ModTypes.Gameplay
+            SaveEnabledState = ModMenu.EnabledSaveType.LoadWithSettings
+
+            def Enable(self):
+                _start_bridge()
+                unrealsdk.RegisterHook(
+                    "WillowGame.WillowPlayerController.PlayerTick",
+                    "BorderCraft_Tick",
+                    self._on_tick,
+                )
+                unrealsdk.RegisterHook(
+                    "WillowGame.WillowPlayerController.InputKey",
+                    "BorderCraft_Input",
+                    self._on_input,
+                )
+
+            def Disable(self):
+                for function, hook_id in (
+                    ("WillowGame.WillowPlayerController.PlayerTick", "BorderCraft_Tick"),
+                    ("WillowGame.WillowPlayerController.InputKey", "BorderCraft_Input"),
+                ):
+                    try:
+                        unrealsdk.RemoveHook(function, hook_id)
+                    except Exception:
+                        pass
+                _stop_bridge()
+
+            def _on_tick(self, caller, function, params):
+                if _runner is not None:
+                    _runner.on_engine_tick()
+                return True
+
+            def _on_input(self, caller, function, params):
+                if _runner is not None:
+                    _runner.on_input(params)
+                return True
+
+        ModMenu.RegisterMod(BorderCraft())
+    else:
+        # Current willow2-sdk hooks are registered with the mod and only run while it is enabled.
+        @hook("WillowGame.WillowPlayerController.PlayerTick", Type.PRE)
+        def _on_tick(caller, params, ret, function):
+            if _runner is not None:
+                _runner.on_engine_tick()
+
+        @hook("WillowGame.WillowPlayerController.InputKey", Type.PRE)
+        def _on_input(caller, params, ret, function):
+            if _runner is not None:
+                _runner.on_input(params)
+
+        def on_enable() -> None:
+            _start_bridge()
+
+        def on_disable() -> None:
+            _stop_bridge()
+
+        BorderCraft = build_mod()

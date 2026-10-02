@@ -1,7 +1,8 @@
 # BorderCraft — Install Guide (Windows)
 
-You own both games: **Borderlands 2 (PC)** and **Minecraft Java Edition**. The prebuilt jar in
-`release/` targets **Minecraft 1.21.1** (Fabric). ~10 minutes.
+You own both games: **Borderlands 2 (PC)** and **Minecraft Java Edition**. The BL2 SDK package in
+`release/` is ready to install, and the prebuilt Minecraft jar targets **Minecraft 1.21.1** (Fabric).
+~10 minutes.
 
 > **What this install gets you:** the "hello bridge" milestone — both mods load, the two real
 > game processes connect over the shared memory, and you can watch them handshake. The
@@ -21,18 +22,18 @@ You own both games: **Borderlands 2 (PC)** and **Minecraft Java Edition**. The p
      (Epic: `C:\Program Files\Epic Games\Borderlands2`). You should end up with a
      **`sdk_mods\`** folder in the game directory. Accept overwrites if asked.
 
-2. **Copy the BorderCraft mod** from this project:
-   ```
-   copy this project's  bl2sdk\BorderCraft      →  <game folder>\sdk_mods\BorderCraft
-   copy this project's  protocol\python\bordercraft_protocol.py
-                                                 →  <game folder>\sdk_mods\BorderCraft\bordercraft_protocol.py
-   ```
-   (The second step drops the protocol file next to `__init__.py` — that's the layout the mod
-   looks for. No nested double folders: `sdk_mods\BorderCraft\__init__.py` must exist.)
+2. **Install BorderCraft**:
+   - For willow2-sdk 3.x and newer, copy `release\BorderCraft.sdkmod` directly into
+     `<game folder>\sdk_mods\`. Do not unzip the `.sdkmod` file.
+   - For older PythonSDK installs, extract `release\BorderCraft-0.1.0-legacy.zip` into
+     `<game folder>\sdk_mods\`. It contains one `BorderCraft` folder; the result must be
+     `sdk_mods\BorderCraft\__init__.py`.
+   - The package includes the shared protocol module; no second file copy is needed.
 
-3. **Launch Borderlands 2.** On the main menu, click **MODS** → find **BorderCraft** → enable it.
-   A bridge file appears at `%LOCALAPPDATA%\BorderCraft\bridge.mm` (that's the shared memory).
-   To double-check, look for a `[BorderCraft] bridge up ...` line in
+3. **Restart Borderlands 2.** Open **MODS** → find **BorderCraft** → enable it. The mod menu
+   should show its BorderCraft name and description. When enabled, a bridge file appears at
+   `%LOCALAPPDATA%\BorderCraft\bridge.mm` (the shared memory). To double-check, look for a
+   `[BorderCraft] bridge up ...` line in
    `Documents\My Games\Borderlands 2\WillowGame\Logs\Launch.log`.
 
 ## Part 2 — Minecraft side
@@ -67,8 +68,8 @@ You own both games: **Borderlands 2 (PC)** and **Minecraft Java Edition**. The p
 | Symptom | Fix |
 |---|---|
 | No MODS menu in BL2 | Python SDK didn't install into the game folder — the zip must merge so `sdk_mods\` sits next to `Binaries\`. Re-extract. |
-| MODS menu has no BorderCraft | Folder nesting wrong — must be `sdk_mods\BorderCraft\__init__.py`, not `sdk_mods\BorderCraft\BorderCraft\...` |
-| BL2 error `No module named 'bordercraft_protocol'` | You skipped the second copy in Part 1 step 2. |
+| MODS menu has no BorderCraft | Check that `BorderCraft.sdkmod` is directly in `sdk_mods\` (do not unzip it). For the legacy ZIP, extract its single `BorderCraft` folder directly into `sdk_mods\`; avoid double nesting. Restart the game after installing. |
+| BL2 log reports a Python import error | Reinstall the complete `.sdkmod` or legacy ZIP from `release/`; both packages include the protocol module. |
 | MC log says `bad magic` / `protocol version` | Stale bridge from an older build: close both games, delete `%LOCALAPPDATA%\BorderCraft\bridge.mm`, start again. |
 | MC log shows nothing about BorderCraft | The jar isn't in `mods\`, or you launched a non-Fabric profile. |
 | MC crashes on startup | Check `latest.log` — if it's a mod conflict, try with only Fabric API + BorderCraft in `mods\`. |
@@ -76,5 +77,5 @@ You own both games: **Borderlands 2 (PC)** and **Minecraft Java Edition**. The p
 
 ## Uninstall
 
-Delete `sdk_mods\BorderCraft` from the game folder, delete `mods\bordercraft-0.1.0.jar`, and
-remove `%LOCALAPPDATA%\BorderCraft`. Nothing touches your saves.
+Delete `sdk_mods\BorderCraft.sdkmod` (or the legacy `sdk_mods\BorderCraft` folder), delete
+`mods\bordercraft-0.1.0.jar`, and remove `%LOCALAPPDATA%\BorderCraft`. Nothing touches your saves.
