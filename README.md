@@ -86,6 +86,9 @@ python3 tools/protocol_selftest.py
 # bridge lifecycle regression tests (includes Windows mapped-file / EINVAL failures)
 python3 tools/test_bridge_lifecycle.py
 
+# BL2 adapter tests (live pawn/map state conversion + game-thread safety; no game needed)
+python3 tools/test_host_adapter.py
+
 # package the BL2 mod as BorderCraft.sdkmod + legacy folder ZIP
 python3 tools/package_bl2.py
 
@@ -104,9 +107,10 @@ python3 tools/jar_check.py
 ## Roadmap (short version — details in docs/DESIGN.md)
 
 1. ✅ **Phase 0** — shared-memory protocol + self-test (handshake, states, rings, teleport).
-2. 🔶 **Phase 1a** — draw Minecraft's frames inside BL2's window. The overlay double buffer is
-   protocol-tested; Minecraft now publishes after its in-world HUD render. GL readback still needs
-   in-game verification, and the UE3 fullscreen blit is not implemented yet.
+2. 🔶 **Phase 1a** — draw Minecraft's frames inside BL2's window. BL2 now publishes its live pawn,
+   look, map, pause/loading, viewport and time-dilation state from the engine thread. The overlay
+   double buffer is protocol-tested and Minecraft publishes after its in-world HUD render. GL
+   readback still needs in-game verification; MC camera slaving and the UE3 fullscreen blit remain.
 3. **Phase 1b** — Minecraft physics authoritative (SkyCraft-style puppet loop) + input bridge.
 4. **Phase 2** — Pandora collision into MC physics, NPC proxies, combat both ways, water.
 5. **Phase 3** — native voxel rendering and digging into Pandora's meshes (stretch).

@@ -655,9 +655,36 @@ class Bridge:
 
 
 def ue_to_mc(x: float, y: float, z: float) -> tuple[float, float, float]:
-    """Unreal (Z-up) -> Minecraft (Y-up). Signs pinned exactly in Phase 0 calibration."""
+    """Unreal (Z-up) -> Minecraft (Y-up)."""
     return (x / UNITS_PER_BLOCK, z / UNITS_PER_BLOCK, y / UNITS_PER_BLOCK)
 
 
 def mc_to_ue(x: float, y: float, z: float) -> tuple[float, float, float]:
     return (x * UNITS_PER_BLOCK, z * UNITS_PER_BLOCK, y * UNITS_PER_BLOCK)
+
+
+def _wrap_degrees(angle: float) -> float:
+    """Normalize an angle to [-180, 180)."""
+    return (angle + 180.0) % 360.0 - 180.0
+
+
+def ue_rotator_to_mc(pitch: float, yaw: float) -> tuple[float, float]:
+    """Convert UE3 rotator units to Minecraft ``(yaw, pitch)`` degrees.
+
+    UE yaw zero faces +X and increases toward +Y. With the position mapping above, Minecraft
+    yaw -90 faces +X and yaw zero faces +Z, hence the -90 degree offset. UE positive pitch looks
+    up while Minecraft positive pitch looks down, so pitch changes sign. UE rotators may arrive
+    either signed or as wrapped 16-bit values; normalizing handles both representations.
+    """
+    units_to_degrees = 360.0 / 65536.0
+    mc_yaw = _wrap_degrees(yaw * units_to_degrees - 90.0)
+    mc_pitch = _wrap_degrees(-pitch * units_to_degrees)
+    return mc_yaw, max(-90.0, min(90.0, mc_pitch))
+
+
+def mc_rotator_to_ue(yaw: float, pitch: float) -> tuple[int, int]:
+    """Convert Minecraft ``(yaw, pitch)`` degrees to UE3 ``(pitch, yaw)`` rotator units."""
+    degrees_to_units = 65536.0 / 360.0
+    ue_pitch = round(_wrap_degrees(-pitch) * degrees_to_units)
+    ue_yaw = round(_wrap_degrees(yaw + 90.0) * degrees_to_units)
+    return ue_pitch, ue_yaw

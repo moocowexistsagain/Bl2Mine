@@ -156,12 +156,12 @@ if unrealsdk is not None:
         ModMenu.RegisterMod(BorderCraft())
     else:
         # Current willow2-sdk hooks are registered with the mod and only run while it is enabled.
-        @hook("WillowGame.WillowPlayerController.PlayerTick", Type.PRE)
+        @hook("WillowGame.WillowPlayerController:PlayerTick", Type.PRE)
         def _on_tick(caller, params, ret, function):
             if _runner is not None:
                 _runner.on_engine_tick()
 
-        @hook("WillowGame.WillowPlayerController.InputKey", Type.PRE)
+        @hook("WillowGame.WillowPlayerController:InputKey", Type.PRE)
         def _on_input(caller, params, ret, function):
             if _runner is not None:
                 _runner.on_input(params)
