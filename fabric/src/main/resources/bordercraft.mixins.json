@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.bordercraft.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "EntityCollisionMixin"
+  ],
+  "client": [],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

@@ -49,6 +49,28 @@ CHECKS = {
     "MC_STATE_LEN": "MC_STATE_BYTES",  # special: computed below
     "BL2_STATE_LEN": "BL2_STATE_BYTES",
     "NO_WATER": "NO_WATER",
+    # v2 gameplay regions
+    "OFF_POSE": "OFF_POSE",
+    "OFF_HUD": "OFF_HUD",
+    "OFF_BLOCKS": "OFF_BLOCKS",
+    "OFF_BL2_EVENT_RING": "OFF_BL2_EVENT_RING",
+    "BL2_EVENT_RING_ENTRIES": "BL2_EVENT_RING_ENTRIES",
+    "HUD_SLOTS": "HUD_SLOTS",
+    "HUD_NAME_BYTES": "HUD_NAME_BYTES",
+    "MAX_BLOCKS": "MAX_BLOCKS",
+    "POSE_SLIM": "POSE_SLIM",
+    "POSE_MAIN_HAND_LEFT": "POSE_MAIN_HAND_LEFT",
+    "HUD_SCREEN_OPEN": "HUD_SCREEN_OPEN",
+    "HUD_INVENTORY_OPEN": "HUD_INVENTORY_OPEN",
+    "SLOT_BLOCK": "SLOT_BLOCK",
+    "SLOT_SELECTED": "SLOT_SELECTED",
+    "SLOT_DAMAGED": "SLOT_DAMAGED",
+    "SLOT_ENCHANTED": "SLOT_ENCHANTED",
+    "BLOCK_FULL_CUBE": "BLOCK_FULL_CUBE",
+    "BLOCK_TRANSLUCENT": "BLOCK_TRANSLUCENT",
+    "EVT_BL2_DAMAGE_PLAYER": "EVT_BL2_DAMAGE_PLAYER",
+    "EVT_BL2_ACTOR_DIED": "EVT_BL2_ACTOR_DIED",
+    "DAMAGE_EXPLOSION": "DAMAGE_EXPLOSION",
 }
 
 
@@ -56,13 +78,21 @@ def java_constants(path: str) -> dict[str, float]:
     src = open(path, encoding="utf-8").read()
     out = {}
     pat = re.compile(
-        r"public\s+static\s+final\s+(?:int|long|double|float)\s+(\w+)\s*=\s*([^;]+);"
+        r"public\s+static\s+final\s+(?:int|long|double|float)\s+([^;]+);"
     )
     decls = []
-    for name, expr in pat.findall(src):
+    pairs = []
+    for body in pat.findall(src):
+        # One declaration statement may declare several constants: "int A = 1, B = 2;".
+        for part in body.split(","):
+            if "=" not in part:
+                continue
+            name, _, expr = part.partition("=")
+            pairs.append((name.strip(), expr))
+    for name, expr in pairs:
         expr = expr.split("//")[0].strip()
         expr = expr.replace("(long)", "").replace("(int)", "")
-        expr = re.sub(r"(?<=\d)[fFdD]\b", "", expr)  # strip Java float/double literal suffixes
+        expr = re.sub(r"(?<=\d)[fFdDlL]\b", "", expr)  # strip Java numeric literal suffixes
         expr = re.sub(r"\b0x([0-9A-Fa-f]+)", lambda m: str(int(m.group(1), 16)), expr)
         decls.append((name, expr))
 
@@ -74,7 +104,7 @@ def java_constants(path: str) -> dict[str, float]:
             resolved = expr
             for k, v in out.items():
                 resolved = re.sub(rf"\b{k}\b", repr(v), resolved)
-            if re.fullmatch(r"[\d\s\*\+\-\.eE']+", resolved):
+            if re.fullmatch(r"[\d\s\*\+\-\.eE'()<>/]+", resolved):
                 try:
                     out[name] = float(eval(resolved, {"__builtins__": {}}))
                     progress = True

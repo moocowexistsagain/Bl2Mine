@@ -16,7 +16,9 @@ from dataclasses import dataclass
 from typing import Iterator, Optional
 
 MAGIC = 0x54464342  # "BCFT"
-VERSION = 1
+# v2 appends the gameplay regions (pose, HUD/inventory, placed blocks) after the overlay
+# pixels; every v1 offset is unchanged.
+VERSION = 2
 MAPPING_FILENAME = "bridge.mm"
 UNITS_PER_BLOCK = 53.3333  # Unreal units per Minecraft block
 
@@ -37,7 +39,15 @@ MAX_OVERLAY_W = 1920
 MAX_OVERLAY_H = 1080
 OVERLAY_SLOT_BYTES = MAX_OVERLAY_W * MAX_OVERLAY_H * 4
 OVERLAY_SLOTS = 2
-MAPPING_BYTES = OFF_OVERLAY_PIXELS + OVERLAY_SLOT_BYTES * OVERLAY_SLOTS  # 0x1452000
+
+# v2 gameplay regions, appended after the overlay pixels (0x1452000).
+OFF_POSE = 0x1452000
+OFF_HUD = 0x1452100
+OFF_BLOCKS = 0x1453000
+# BL2 -> MC events (the ring at OFF_EVENT_RING is MC -> BL2 only).
+OFF_BL2_EVENT_RING = 0x1460000
+BL2_EVENT_RING_ENTRIES = 4096
+MAPPING_BYTES = 0x1490000
 
 INPUT_RING_ENTRIES = 4096
 INPUT_RING_BASE = 0x80
@@ -76,6 +86,33 @@ COL_STEEP = 1 << 2
 COL_HEIGHTFIELD = 0
 COL_AABBS = 1
 
+POSE_SLIM = 1 << 0
+POSE_SNEAKING = 1 << 1
+POSE_SWIMMING = 1 << 2
+POSE_SPRINTING = 1 << 3
+POSE_USING_ITEM = 1 << 4
+POSE_MAIN_HAND_LEFT = 1 << 5
+POSE_ON_GROUND = 1 << 6
+POSE_INVISIBLE = 1 << 7
+
+HUD_SLOTS = 46
+HUD_NAME_BYTES = 24
+HUD_SCREEN_OPEN = 1 << 0
+HUD_INVENTORY_OPEN = 1 << 1
+HUD_CREATIVE = 1 << 2
+HUD_HARDCORE = 1 << 3
+HUD_UNDERWATER = 1 << 4
+
+SLOT_SELECTED = 1 << 0
+SLOT_ENCHANTED = 1 << 1
+SLOT_BLOCK = 1 << 2
+SLOT_DAMAGED = 1 << 3
+
+MAX_BLOCKS = 2048
+BLOCK_TRANSLUCENT = 1 << 0
+BLOCK_EMISSIVE = 1 << 1
+BLOCK_FULL_CUBE = 1 << 2
+
 ACTOR_HOSTILE = 1 << 0
 ACTOR_DEAD = 1 << 1
 ACTOR_BOSS = 1 << 2
@@ -91,6 +128,20 @@ EVT_PLAYER_HIT_ACTOR, EVT_ACTOR_HIT_PLAYER = 1, 2
 EVT_BLOCK_PLACE, EVT_BLOCK_BREAK = 3, 4
 EVT_PLAYER_DIED, EVT_PLAYER_RESPAWNED = 5, 6
 EVT_SOUND_PLAY, EVT_APPROACH_ACTOR = 7, 8
+# BL2 -> MC event types (same record layout, carried on OFF_BL2_EVENT_RING)
+EVT_BL2_DAMAGE_PLAYER = 64
+EVT_BL2_KILL_PLAYER = 65
+EVT_BL2_ACTOR_DIED = 66
+EVT_BL2_HEALED = 67
+
+# EVT_BL2_DAMAGE_PLAYER flags: which synthetic Minecraft damage source to use.
+DAMAGE_GUN = 0
+DAMAGE_EXPLOSION = 1
+DAMAGE_MELEE = 2
+DAMAGE_FIRE = 3
+DAMAGE_CORROSIVE = 4
+DAMAGE_SHOCK = 5
+DAMAGE_FALL = 6
 
 NO_WATER = -1.0e30
 
@@ -103,12 +154,24 @@ _MC_FMT = (
 _INPUT_FMT = "<HHiiI"
 _EVENT_FMT = "<HHIffffff"
 _ACTOR_FMT = "<IIffffffffQ"
+_POSE_FMT = "<II" "fffffffff" "fff" "II" "ff" "8I"
+_HUD_HEAD_FMT = "<II" "8f" "If" "II" "2I"
+_HUD_SLOT_FMT = "<IHHIHH" + str(HUD_NAME_BYTES) + "s"
+_BLOCK_HEAD_FMT = "<IIII"
+_BLOCK_FMT = "<iii4B"
 
 assert struct.calcsize(_BL2_FMT) == 0x40
 assert struct.calcsize(_MC_FMT) == 0xC8
 assert struct.calcsize(_INPUT_FMT) == 0x10
 assert struct.calcsize(_EVENT_FMT) == 0x20
 assert struct.calcsize(_ACTOR_FMT) == 0x30
+assert struct.calcsize(_POSE_FMT) == 0x68
+assert struct.calcsize(_HUD_HEAD_FMT) == 0x40
+assert struct.calcsize(_HUD_SLOT_FMT) == 0x28
+assert struct.calcsize(_BLOCK_FMT) == 0x10
+assert OFF_HUD + 0x40 + HUD_SLOTS * 0x28 <= OFF_BLOCKS
+assert OFF_BLOCKS + 0x40 + MAX_BLOCKS * 0x10 <= OFF_BL2_EVENT_RING
+assert OFF_BL2_EVENT_RING + 0x80 + BL2_EVENT_RING_ENTRIES * 0x20 <= MAPPING_BYTES
 
 
 def default_mapping_path() -> str:
@@ -207,6 +270,75 @@ class McEvent:
     x: float = 0.0
     y: float = 0.0
     z: float = 0.0
+
+
+@dataclass
+class PoseState:
+    """Everything BL2 needs to pose the real 3D Minecraft player model.
+
+    Minecraft owns the physics and therefore the animation inputs; the BL2 side only evaluates
+    the vanilla biped rig from them (see ``bl2sdk/BorderCraft/model3d.py``).
+    """
+
+    flags: int = 0
+    body_yaw: float = 0.0
+    head_yaw: float = 0.0
+    head_pitch: float = 0.0
+    limb_swing: float = 0.0
+    limb_swing_amount: float = 0.0
+    hand_swing: float = 0.0
+    sneak_amount: float = 0.0
+    lean_angle: float = 0.0
+    scale: float = 1.0
+    vel_x: float = 0.0
+    vel_y: float = 0.0
+    vel_z: float = 0.0
+    held_main_rgb: int = 0
+    held_off_rgb: int = 0
+    fall_distance: float = 0.0
+    hurt_time: float = 0.0
+
+
+@dataclass
+class HudSlot:
+    item_hash: int = 0
+    count: int = 0
+    flags: int = 0
+    rgb: int = 0
+    damage: int = 0
+    name: str = ""
+
+
+@dataclass
+class HudState:
+    flags: int = 0
+    health: float = 20.0
+    max_health: float = 20.0
+    absorption: float = 0.0
+    armor: float = 0.0
+    food: float = 20.0
+    saturation: float = 5.0
+    air: float = 300.0
+    max_air: float = 300.0
+    xp_level: int = 0
+    xp_progress: float = 0.0
+    selected_slot: int = 0
+    slots: list = None  # list[HudSlot]
+
+    def __post_init__(self):
+        if self.slots is None:
+            self.slots = []
+
+
+@dataclass
+class BlockEntry:
+    x: int = 0
+    y: int = 0
+    z: int = 0
+    r: int = 255
+    g: int = 255
+    b: int = 255
+    flags: int = 0
 
 
 @dataclass
@@ -408,9 +540,14 @@ class Bridge:
         self.mc = Seqlock(buf, OFF_MC_STATE)
         self.water = Seqlock(buf, OFF_WATER_GRID)
         self.actors = Seqlock(buf, OFF_ACTOR_TABLE)
+        self.pose = Seqlock(buf, OFF_POSE)
+        self.hud = Seqlock(buf, OFF_HUD)
+        self.blocks = Seqlock(buf, OFF_BLOCKS)
         self.input_ring = Ring(buf, OFF_INPUT_RING, INPUT_RING_ENTRIES, struct.calcsize(_INPUT_FMT))
         self.collision_ring = Ring(buf, OFF_COLLISION_RING, COLLISION_RING_ENTRIES, COLLISION_REC_BYTES)
         self.event_ring = Ring(buf, OFF_EVENT_RING, EVENT_RING_ENTRIES, struct.calcsize(_EVENT_FMT))
+        self.bl2_event_ring = Ring(buf, OFF_BL2_EVENT_RING, BL2_EVENT_RING_ENTRIES,
+                                   struct.calcsize(_EVENT_FMT))
         self.overlay = Overlay(buf)
 
     # -- lifecycle ---------------------------------------------------------------------------
@@ -629,6 +766,18 @@ class Bridge:
         t, flags, actor_id, a, b, c, x, y, z = struct.unpack(_EVENT_FMT, rec)
         return McEvent(t, flags, actor_id, a, b, c, x, y, z)
 
+    def push_bl2_event(self, e: McEvent) -> bool:
+        """BL2 -> MC: damage the Minecraft player, report a dead pawn, and so on."""
+        return self.bl2_event_ring.push(struct.pack(
+            _EVENT_FMT, e.type & 0xFFFF, e.flags & 0xFFFF, e.actor_id, e.a, e.b, e.c, e.x, e.y, e.z))
+
+    def pop_bl2_event(self) -> Optional[McEvent]:
+        rec = self.bl2_event_ring.pop()
+        if rec is None:
+            return None
+        t, flags, actor_id, a, b, c, x, y, z = struct.unpack(_EVENT_FMT, rec)
+        return McEvent(t, flags, actor_id, a, b, c, x, y, z)
+
     def push_collision(self, rec_bytes: bytes) -> bool:
         return self.collision_ring.push(rec_bytes)
 
@@ -669,6 +818,101 @@ class Bridge:
         if not self.actors.read_ok(seq):
             return None
         return out
+
+    # -- pose (MC -> BL2) --------------------------------------------------------------------
+    def write_pose(self, p: PoseState) -> None:
+        seq = self.pose.begin_write()
+        struct.pack_into(
+            _POSE_FMT, self.buf, OFF_POSE, seq & 0xFFFFFFFF, p.flags,
+            p.body_yaw, p.head_yaw, p.head_pitch, p.limb_swing, p.limb_swing_amount,
+            p.hand_swing, p.sneak_amount, p.lean_angle, p.scale,
+            p.vel_x, p.vel_y, p.vel_z,
+            p.held_main_rgb & 0xFFFFFFFF, p.held_off_rgb & 0xFFFFFFFF,
+            p.fall_distance, p.hurt_time, *([0] * 8),
+        )
+        self.pose.end_write(seq)
+
+    def read_pose(self) -> Optional[PoseState]:
+        seq = self.pose.try_read()
+        if seq is None:
+            return None
+        v = struct.unpack_from(_POSE_FMT, self.buf, OFF_POSE)
+        if not self.pose.read_ok(seq):
+            return None
+        return PoseState(
+            flags=v[1], body_yaw=v[2], head_yaw=v[3], head_pitch=v[4],
+            limb_swing=v[5], limb_swing_amount=v[6], hand_swing=v[7],
+            sneak_amount=v[8], lean_angle=v[9], scale=v[10],
+            vel_x=v[11], vel_y=v[12], vel_z=v[13],
+            held_main_rgb=v[14], held_off_rgb=v[15],
+            fall_distance=v[16], hurt_time=v[17],
+        )
+
+    # -- HUD / inventory (MC -> BL2) ---------------------------------------------------------
+    def write_hud(self, h: HudState) -> None:
+        seq = self.hud.begin_write()
+        slots = list(h.slots or [])[:HUD_SLOTS]
+        struct.pack_into(
+            _HUD_HEAD_FMT, self.buf, OFF_HUD, seq & 0xFFFFFFFF, h.flags,
+            h.health, h.max_health, h.absorption, h.armor, h.food, h.saturation, h.air,
+            h.max_air, h.xp_level, h.xp_progress, h.selected_slot, len(slots), 0, 0,
+        )
+        for i, s in enumerate(slots):
+            struct.pack_into(
+                _HUD_SLOT_FMT, self.buf, OFF_HUD + 0x40 + i * 0x28,
+                s.item_hash & 0xFFFFFFFF, s.count & 0xFFFF, s.flags & 0xFFFF,
+                s.rgb & 0xFFFFFFFF, s.damage & 0xFFFF, 0,
+                s.name.encode("utf-8", "replace")[:HUD_NAME_BYTES],
+            )
+        self.hud.end_write(seq)
+
+    def read_hud(self) -> Optional[HudState]:
+        seq = self.hud.try_read()
+        if seq is None:
+            return None
+        v = struct.unpack_from(_HUD_HEAD_FMT, self.buf, OFF_HUD)
+        count = min(v[13], HUD_SLOTS)
+        slots = []
+        for i in range(count):
+            s = struct.unpack_from(_HUD_SLOT_FMT, self.buf, OFF_HUD + 0x40 + i * 0x28)
+            slots.append(HudSlot(
+                item_hash=s[0], count=s[1], flags=s[2], rgb=s[3], damage=s[4],
+                name=s[6].split(b"\x00", 1)[0].decode("utf-8", "replace"),
+            ))
+        if not self.hud.read_ok(seq):
+            return None
+        return HudState(
+            flags=v[1], health=v[2], max_health=v[3], absorption=v[4], armor=v[5],
+            food=v[6], saturation=v[7], air=v[8], max_air=v[9],
+            xp_level=v[10], xp_progress=v[11], selected_slot=v[12],
+            slots=slots,
+        )
+
+    # -- placed-block mirror (MC -> BL2) -----------------------------------------------------
+    def write_blocks(self, entries: list, world_id: int = 0, revision: int = 0) -> None:
+        seq = self.blocks.begin_write()
+        entries = list(entries)[:MAX_BLOCKS]
+        struct.pack_into(_BLOCK_HEAD_FMT, self.buf, OFF_BLOCKS,
+                         seq & 0xFFFFFFFF, len(entries), world_id & 0xFFFFFFFF,
+                         revision & 0xFFFFFFFF)
+        for i, e in enumerate(entries):
+            struct.pack_into(_BLOCK_FMT, self.buf, OFF_BLOCKS + 0x40 + i * 0x10,
+                             e.x, e.y, e.z, e.r & 0xFF, e.g & 0xFF, e.b & 0xFF, e.flags & 0xFF)
+        self.blocks.end_write(seq)
+
+    def read_blocks(self):
+        """Returns ``(entries, world_id, revision)`` or ``None`` while the writer is active."""
+        seq = self.blocks.try_read()
+        if seq is None:
+            return None
+        _, count, world_id, revision = struct.unpack_from(_BLOCK_HEAD_FMT, self.buf, OFF_BLOCKS)
+        out = []
+        for i in range(min(count, MAX_BLOCKS)):
+            v = struct.unpack_from(_BLOCK_FMT, self.buf, OFF_BLOCKS + 0x40 + i * 0x10)
+            out.append(BlockEntry(*v))
+        if not self.blocks.read_ok(seq):
+            return None
+        return out, world_id, revision
 
 
 def ue_to_mc(x: float, y: float, z: float) -> tuple[float, float, float]:
