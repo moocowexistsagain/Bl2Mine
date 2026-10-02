@@ -49,6 +49,7 @@ bordercraft/
 ├── docs/DESIGN.md
 └── tools/
     ├── protocol_selftest.py          # cross-process protocol test (runs anywhere)
+    ├── jar_check.py                  # static checks on the prebuilt Minecraft jar (no JDK)
     └── package_bl2.py                # builds the installable BL2 SDK packages
 ```
 
@@ -87,6 +88,9 @@ python3 tools/package_bl2.py
 
 # Minecraft mod
 cd fabric && ./gradlew build        # jar in build/libs/
+
+# check a prebuilt jar before shipping/replacing it (catches the view-handle crash modes)
+python3 tools/jar_check.py
 
 # protocol change? edit protocol/bordercraft_protocol.h, then update BOTH mirrors:
 #   protocol/python/bordercraft_protocol.py
