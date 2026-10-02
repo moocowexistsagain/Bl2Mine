@@ -7,7 +7,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   test-and-build:
@@ -44,6 +44,20 @@ jobs:
 
       - name: Check built jar bytecode
         run: python tools/jar_check.py fabric/build/libs/bordercraft-0.1.0.jar
+
+      # Keep release/ usable for people who install from the repository without a JDK. Commits
+      # made by GITHUB_TOKEN do not recursively trigger this workflow.
+      - name: Refresh prebuilt jar on Arena branches
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/arena/')
+        run: |
+          cp fabric/build/libs/bordercraft-0.1.0.jar release/bordercraft-0.1.0.jar
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add release/bordercraft-0.1.0.jar
+          if ! git diff --cached --quiet; then
+            git commit -m "Update prebuilt Fabric jar"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
 
       - name: Upload installable Fabric jar
         uses: actions/upload-artifact@v4
