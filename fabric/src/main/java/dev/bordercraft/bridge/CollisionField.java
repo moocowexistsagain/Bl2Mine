@@ -38,6 +38,12 @@ public final class CollisionField {
     private volatile int epoch = -1;
     private volatile boolean enabled = true;
     public volatile int sectionsLoaded = 0;
+    /**
+     * Set by EntityCollisionMixin the first time it runs. The mixin is declared {@code
+     * require = 0} so a mapping change degrades to "no Pandora collision" instead of a crash -
+     * which would otherwise be a silent failure, so the bridge checks for it and says so.
+     */
+    public volatile boolean mixinActive = false;
 
     private CollisionField() {}
 
@@ -122,6 +128,7 @@ public final class CollisionField {
      * (the overwhelmingly common case while no Borderlands 2 host is attached).</p>
      */
     public List<VoxelShape> collect(Box box) {
+        mixinActive = true;   // proof the injection applied, whatever it finds
         if (!enabled || sections.isEmpty()) {
             return List.of();
         }

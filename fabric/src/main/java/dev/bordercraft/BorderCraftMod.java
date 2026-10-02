@@ -55,6 +55,7 @@ public class BorderCraftMod implements ClientModInitializer {
     private long frames = 0;
     private long lastOpenAttempt = 0;
     private boolean wasDead = false;
+    private boolean warnedAboutMixin = false;
     private boolean menuWasOpen = false;
 
     @Override
@@ -127,6 +128,8 @@ public class BorderCraftMod implements ClientModInitializer {
         blocks.tick(client, player);
         skinPublisher.publishIfDue(client);
 
+        checkCollisionIsReaching(player);
+
         boolean dead = player.isDead() || player.getHealth() <= 0.0f;
         if (dead != wasDead) {
             // Minecraft's death flow owns the moment: Borderlands 2 hands control back to its
@@ -136,6 +139,24 @@ public class BorderCraftMod implements ClientModInitializer {
                     player.getHealth(), 0, 0,
                     (float) player.getX(), (float) player.getY(), (float) player.getZ());
             wasDead = dead;
+        }
+    }
+
+    /**
+     * Pandora's collision reaches Minecraft through a single mixin on Entity. If that mixin
+     * ever stops applying, the player walks through the world instead of on it - so say so,
+     * loudly and exactly once, rather than leaving a baffling bug.
+     */
+    private void checkCollisionIsReaching(ClientPlayerEntity player) {
+        if (warnedAboutMixin || CollisionField.INSTANCE.mixinActive) {
+            return;
+        }
+        if (CollisionField.INSTANCE.sectionsLoaded > 0 && frames > 200) {
+            LOG.error("BorderCraft: {} collision sections received from Borderlands 2 but the "
+                            + "Entity collision mixin has never run. Minecraft physics will not "
+                            + "collide with Pandora. Check that bordercraft.mixins.json applied.",
+                    CollisionField.INSTANCE.sectionsLoaded);
+            warnedAboutMixin = true;
         }
     }
 
