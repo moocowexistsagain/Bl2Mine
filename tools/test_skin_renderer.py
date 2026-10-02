@@ -85,6 +85,18 @@ class SkinRendererTests(unittest.TestCase):
         self.assertTrue(all(rect[1] == 8 * 5 for rect in red))
         self.assertTrue(all(rect[-1] is texture for rect in canvas.rects))
 
+    def test_world_bounds_place_skin_over_projected_third_person_pawn(self):
+        bridge = FakeBridge()
+        renderer = render.OverlayCompositor(bridge, white_texture=object())
+        bridge.overlay.frames.append((9, 64, 64, P.OVERLAY_SKIN, skin_with_red_face()))
+        renderer.poll()
+
+        canvas = FakeCanvas()
+        self.assertTrue(renderer.draw_avatar(canvas, (400.0, 500.0, 320.0)))
+        self.assertEqual(canvas.rects[0][3], (255, 0, 0, 255))  # no HUD backdrop in world mode
+        self.assertEqual(canvas.rects[0][0], (360.0, 180.0))
+        self.assertEqual((canvas.rects[0][1], canvas.rects[0][2]), (80, 10))
+
     def test_bottom_up_skin_rows_are_addressed_correctly(self):
         bridge = FakeBridge()
         renderer = render.OverlayCompositor(bridge, white_texture=object())

@@ -136,8 +136,9 @@ MC in Phase 1b (the real SkyCraft-style loop).
 
 - **Phase 1a native-free slice (implemented):** MC reads the authenticated player's 64×64 GPU skin
   into BGRA and sends it through the shared-memory overlay double buffer. BL2 caches that payload
-  and draws a wide/slim pixel-art paper doll with UE3 Canvas rectangles. It is always visible and
-  its limbs animate from BL2 pawn movement; no arbitrary UE3 texture upload is needed.
+  and draws a wide/slim pixel-art paper doll with UE3 Canvas rectangles. It is always visible,
+  its limbs animate from BL2 pawn movement, and F5 toggles a third-person projection over the
+  controlled BL2 pawn; no arbitrary UE3 texture upload is needed.
 - **Phase 1a full composite (blocked):** MC renders its world (and hand + HUD) offscreen each frame.
   A native D3D9 helper must upload the BGRA frame because no supported willow2-sdk API for creating
   an arbitrary runtime UE3 texture has been established.

@@ -88,6 +88,10 @@ def _stop_bridge() -> None:
     _runner = _thread = _bridge = None
 
     if runner is not None:
+        try:
+            runner.on_mod_disable()
+        except Exception as exc:
+            _log("error restoring avatar view: " + repr(exc))
         runner.stop()
     if thread is not None and thread.is_alive():
         thread.join(timeout=2.0)

@@ -34,6 +34,7 @@ class GameAdapter:
     ):
         self._pc_getter = pc_getter
         self._engine_getter = engine_getter
+        self._skin_world_view = False
 
     def _pc(self):
         try:
@@ -138,6 +139,84 @@ class GameAdapter:
         except (AttributeError, TypeError, ValueError):
             return 1.0
 
+    # -- visible skin view --------------------------------------------------------------------
+    @staticmethod
+    def _set_pawn_mesh_hidden(pawn, hidden: bool) -> None:
+        mesh = getattr(pawn, "Mesh", None) if pawn is not None else None
+        if mesh is not None:
+            try:
+                mesh.SetHidden(hidden)
+            except Exception:
+                pass
+
+    def set_skin_world_view(self, enabled: bool) -> bool:
+        """Put BL2 in third person so the Canvas skin can track the controlled pawn on screen."""
+        pc = self._pc()
+        pawn = getattr(pc, "Pawn", None) if pc is not None else None
+        if pc is None or pawn is None:
+            self._skin_world_view = False
+            return False
+        try:
+            pc.SetBehindView(bool(enabled))
+            if enabled:
+                # The same stable UE3 camera properties used by established BL2 third-person mods.
+                pawn.CameraScale = 3.0
+                pawn.CameraScaleRight = 1.5
+                pawn.CameraScaleUp = 1.0
+            # Leave the normal model visible until PostRender proves it can project the skin.
+            # This avoids an invisible pawn on legacy SDKs that cannot construct Vector structs.
+            if not enabled:
+                self._set_pawn_mesh_hidden(pawn, False)
+            self._skin_world_view = bool(enabled)
+        except Exception:
+            self._skin_world_view = False
+        return self._skin_world_view
+
+    def toggle_skin_world_view(self) -> bool:
+        return self.set_skin_world_view(not self._skin_world_view)
+
+    def avatar_screen_bounds(self, canvas) -> tuple[float, float, float] | None:
+        """Return (screen center X, feet Y, height) for the local pawn in third person."""
+        if not self._skin_world_view or canvas is None:
+            return None
+        pc = self._pc()
+        pawn = getattr(pc, "Pawn", None) if pc is not None else None
+        location = getattr(pawn, "Location", None) if pawn is not None else None
+        if location is None:
+            return None
+        try:
+            half_height = float(pawn.CylinderComponent.CollisionHeight)
+        except (AttributeError, TypeError, ValueError):
+            half_height = 48.0
+        try:
+            import unrealsdk  # type: ignore
+
+            make_struct = getattr(unrealsdk, "make_struct", None)
+            if make_struct is None:
+                make_struct = getattr(unrealsdk, "MakeStruct")
+            feet_world = make_struct(
+                "Vector", X=float(location.X), Y=float(location.Y), Z=float(location.Z) - half_height
+            )
+            head_world = make_struct(
+                "Vector", X=float(location.X), Y=float(location.Y), Z=float(location.Z) + half_height
+            )
+            feet = canvas.Project(feet_world)
+            head = canvas.Project(head_world)
+            height = float(feet.Y) - float(head.Y)
+            center_x = (float(feet.X) + float(head.X)) * 0.5
+            clip_x, clip_y = float(canvas.ClipX), float(canvas.ClipY)
+            if height < 48.0 or height > clip_y * 1.5:
+                self._set_pawn_mesh_hidden(pawn, False)
+                return None
+            if center_x < -height or center_x > clip_x + height:
+                self._set_pawn_mesh_hidden(pawn, False)
+                return None
+            self._set_pawn_mesh_hidden(pawn, True)
+            return center_x, float(feet.Y), height
+        except Exception:
+            self._set_pawn_mesh_hidden(pawn, False)
+            return None
+
     def move_puppet(self, x: float, y: float, z: float, yaw: float, pitch: float) -> None:
         """PlayerPuppet: set the pawn/capsule to the MC player's position each frame."""
         # TODO(Phase 1b): P.mc_to_ue + SetLocation/SetRotation; disable native movement input
@@ -207,6 +286,7 @@ class BridgeRunner:
     _epoch: int = 0
     _teleport_seq: int = 0
     _last_world_id: int | None = None
+    _world_avatar: bool = False
 
     def __post_init__(self):
         self.compositor = OverlayCompositor(self.bridge)
@@ -227,15 +307,37 @@ class BridgeRunner:
             self.compositor.on_engine_frame(self.game.player_feet_mc())
 
     def on_post_render(self, canvas) -> None:
-        """Draw the cached Minecraft skin through UE3's supported Canvas API."""
+        """Draw the cached skin as a HUD doll or over the controlled third-person pawn."""
         if self.compositor:
-            self.compositor.on_post_render(canvas)
+            bounds = None
+            if self._world_avatar and self.compositor.skin_pixels is not None:
+                bounds = self.game.avatar_screen_bounds(canvas)
+            self.compositor.on_post_render(canvas, bounds)
+
+    @staticmethod
+    def _input_name(value) -> str:
+        return str(getattr(value, "Name", value)).upper()
 
     def on_input(self, params) -> None:
-        """Forward a raw input event to MC. BL2 keeps Esc/Tab/F/~."""
-        # TODO(Phase 1b): translate UE input params -> P.InputEntry (skip BL2-owned keys)
-        # self.bridge.push_input(P.InputEntry(...))
-        pass
+        """F5 toggles the world avatar; other raw events remain BL2-owned in Phase 1a."""
+        key = self._input_name(getattr(params, "Key", ""))
+        event = getattr(params, "Event", None)
+        event_name = self._input_name(event)
+        try:
+            pressed = int(event) == 0  # UE3 IE_Pressed
+        except (TypeError, ValueError):
+            pressed = "PRESSED" in event_name
+        if key == "F5" and pressed:
+            self._world_avatar = self.game.toggle_skin_world_view()
+
+        # TODO(Phase 1b): translate remaining UE input params -> P.InputEntry and suppress BL2
+        # movement once Minecraft physics has Pandora collision to stand on.
+
+    def on_mod_disable(self) -> None:
+        """Restore the BL2 pawn/camera if the mod is disabled while world view is active."""
+        if self._world_avatar:
+            self.game.set_skin_world_view(False)
+            self._world_avatar = False
 
     # -- worker thread --------------------------------------------------------------------------
     def run(self) -> None:

@@ -175,8 +175,12 @@ class OverlayCompositor:
                 )
                 col += run
 
-    def draw_avatar(self, canvas) -> bool:
-        """Draw the cached skin at the lower-right of the BL2 viewport."""
+    def draw_avatar(
+        self,
+        canvas,
+        world_bounds: tuple[float, float, float] | None = None,
+    ) -> bool:
+        """Draw at the lower-right, or over the projected pawn in F5 third-person view."""
         if self.skin_pixels is None or canvas is None:
             return False
         texture = self._texture()
@@ -186,22 +190,29 @@ class OverlayCompositor:
         if clip_x <= 0 or clip_y <= 0:
             return False
 
-        scale = max(2, min(10, int((clip_y * 0.29) / 32.0)))
-        avatar_w, avatar_h = 16 * scale, 32 * scale
-        margin = max(12, scale * 2)
-        origin_x = clip_x - avatar_w - margin
-        origin_y = clip_y - avatar_h - margin
+        if world_bounds is not None:
+            center_x, feet_y, projected_height = world_bounds
+            scale = max(2, min(14, int(projected_height / 32.0)))
+            avatar_w, avatar_h = 16 * scale, 32 * scale
+            origin_x = center_x - avatar_w * 0.5
+            origin_y = feet_y - avatar_h
+        else:
+            scale = max(2, min(10, int((clip_y * 0.29) / 32.0)))
+            avatar_w, avatar_h = 16 * scale, 32 * scale
+            margin = max(12, scale * 2)
+            origin_x = clip_x - avatar_w - margin
+            origin_y = clip_y - avatar_h - margin
 
-        # A translucent plate keeps dark skins readable against Pandora without hiding much HUD.
-        self._draw_rect(
-            canvas,
-            texture,
-            origin_x - scale,
-            origin_y - scale,
-            avatar_w + 2 * scale,
-            avatar_h + 2 * scale,
-            (0, 0, 0, 105),
-        )
+            # A translucent plate keeps the HUD doll readable without hiding much Pandora.
+            self._draw_rect(
+                canvas,
+                texture,
+                origin_x - scale,
+                origin_y - scale,
+                avatar_w + 2 * scale,
+                avatar_h + 2 * scale,
+                (0, 0, 0, 105),
+            )
 
         swing = int(round(math.sin(self._walk_phase) * 2.0 * self._move_amount))
         parts = _SLIM_PARTS if self.skin_flags & P.OVERLAY_SLIM else _WIDE_PARTS
@@ -224,7 +235,11 @@ class OverlayCompositor:
         self.frames_drawn += 1
         return True
 
-    def on_post_render(self, canvas) -> None:
+    def on_post_render(
+        self,
+        canvas,
+        world_bounds: tuple[float, float, float] | None = None,
+    ) -> None:
         """PostRender hook: acquire a late skin update and draw the current avatar."""
         self.poll()
-        self.draw_avatar(canvas)
+        self.draw_avatar(canvas, world_bounds)

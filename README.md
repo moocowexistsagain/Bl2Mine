@@ -15,7 +15,8 @@ Borderlands 2's window.
 
 > **Status: first playable visual slice.** Run both games, open a Minecraft world, and your active
 > 64x64 Minecraft skin appears as a crisp pixel-art avatar in Borderlands 2. You keep normal BL2
-> movement controls; the avatar's limbs animate as your BL2 pawn moves. Minecraft-authoritative
+> movement controls; the avatar's limbs animate as your BL2 pawn moves, and **F5** toggles a
+> third-person view projected over the controlled pawn. Minecraft-authoritative
 > physics, blocks, inventory and combat remain later milestones. Expect rough edges. This is a fan
 > project; it isn't affiliated with Gearbox, 2K, Mojang or Microsoft, and you need to own both games.
 
@@ -116,15 +117,16 @@ python3 tools/jar_check.py
 4. **Phase 2** — Pandora collision into MC physics, NPC proxies, combat both ways, water.
 5. **Phase 3** — native voxel rendering and digging into Pandora's meshes (stretch).
 
-## Controls (planned)
+## Controls
 
-| Key | Does |
+| Key | Current skin-avatar slice |
 |---|---|
-| **Esc** | BL2 menu |
-| **Tab** | BL2 map |
-| **F** | BL2 action skill |
-| **~** | BL2 console |
-| everything else | Minecraft (WASD, Space, Shift, E, 1-9, mouse, T, F5, ...) |
+| **BL2 movement/look controls** | Control the pawn and animate the Minecraft skin |
+| **F5** | Toggle projected third-person skin view / first-person HUD doll |
+| **Esc / Tab / F / ~** | BL2 menu / map / action skill / console |
+
+Forwarding the remaining controls to Minecraft (WASD, Space, Shift, E, mouse, inventory, and so on)
+starts in Phase 1b, after Pandora collision is available to Minecraft physics.
 
 ## Credits
 

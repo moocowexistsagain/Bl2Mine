@@ -12,6 +12,7 @@ import threading
 import unittest
 import zlib
 from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -85,6 +86,7 @@ class FakeGame:
     def __init__(self):
         self.map_id = 0xCAFE
         self.is_paused = False
+        self.skin_world_view = False
 
     def player_feet_mc(self):
         return (1.0, 2.0, 3.0)
@@ -118,6 +120,17 @@ class FakeGame:
 
     def sample_collision(self, _epoch):
         return []
+
+    def toggle_skin_world_view(self):
+        self.skin_world_view = not self.skin_world_view
+        return self.skin_world_view
+
+    def set_skin_world_view(self, enabled):
+        self.skin_world_view = bool(enabled)
+        return self.skin_world_view
+
+    def avatar_screen_bounds(self, _canvas):
+        return (400.0, 500.0, 256.0) if self.skin_world_view else None
 
 
 class GameAdapterTests(unittest.TestCase):
@@ -154,6 +167,49 @@ class GameAdapterTests(unittest.TestCase):
         self.assertEqual(absent.world_id(), 0)
         self.assertEqual(absent.viewport_size(), (0, 0))
         self.assertEqual(absent.game_speed(), 1.0)
+
+    def test_third_person_skin_projects_over_pawn_and_restores_mesh(self):
+        class Mesh:
+            hidden = False
+
+            def SetHidden(self, value):
+                self.hidden = bool(value)
+
+        mesh = Mesh()
+        pawn = SimpleNamespace(
+            Location=SimpleNamespace(X=10.0, Y=20.0, Z=100.0),
+            CylinderComponent=SimpleNamespace(CollisionHeight=48.0),
+            Mesh=mesh,
+        )
+
+        class Pc:
+            Pawn = pawn
+            bBehindView = False
+
+            def SetBehindView(self, enabled):
+                self.bBehindView = bool(enabled)
+
+        pc = Pc()
+        adapter = host.GameAdapter(lambda: pc, lambda: None)
+        fake_sdk = SimpleNamespace(
+            make_struct=lambda _name, **fields: SimpleNamespace(**fields),
+        )
+
+        class Canvas:
+            ClipX, ClipY = 800, 600
+
+            @staticmethod
+            def Project(vector):
+                return SimpleNamespace(X=400.0, Y=500.0 - (vector.Z - 52.0) * 2.0)
+
+        with patch.dict(sys.modules, {"unrealsdk": fake_sdk}):
+            self.assertTrue(adapter.set_skin_world_view(True))
+            self.assertTrue(pc.bBehindView)
+            self.assertEqual(adapter.avatar_screen_bounds(Canvas()), (400.0, 500.0, 192.0))
+            self.assertTrue(mesh.hidden)
+            self.assertFalse(adapter.set_skin_world_view(False))
+            self.assertFalse(pc.bBehindView)
+            self.assertFalse(mesh.hidden)
 
     def test_rotation_conversion_cardinal_directions_and_wrapping(self):
         self.assertEqual(P.ue_rotator_to_mc(0, 0), (-90.0, 0.0))       # UE +X -> MC +X
@@ -198,6 +254,21 @@ class BridgeRunnerTests(unittest.TestCase):
             changed.flags,
             P.BL2_IN_GAME | P.BL2_MENU_OPEN | P.BL2_PAUSED,
         )
+
+    def test_f5_toggles_world_skin_view_and_disable_restores_it(self):
+        bridge = FakeBridge()
+        game = FakeGame()
+        runner = host.BridgeRunner(bridge, game)
+
+        runner.on_input(SimpleNamespace(Key="F5", Event=0))
+        self.assertTrue(runner._world_avatar)
+        self.assertTrue(game.skin_world_view)
+        runner.on_input(SimpleNamespace(Key="F5", Event=1))  # release does not toggle
+        self.assertTrue(game.skin_world_view)
+
+        runner.on_mod_disable()
+        self.assertFalse(runner._world_avatar)
+        self.assertFalse(game.skin_world_view)
 
     def test_worker_never_touches_unreal_adapter(self):
         class ForbiddenGame:

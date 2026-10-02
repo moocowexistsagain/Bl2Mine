@@ -65,6 +65,9 @@ You own both games: **Borderlands 2 (PC)** and **Minecraft Java Edition**. The B
    `BorderCraft: published player skin ...` after the world loads.
 4. Your Minecraft skin appears at the lower-right of the BL2 viewport. Walk in BL2 with its normal
    controls and the avatar's arms/legs swing. Wide (Steve) and slim (Alex) arm layouts are handled.
+5. Press **F5** in gameplay to toggle the controllable world view. BorderCraft switches BL2 to third
+   person, hides the normal pawn mesh where supported, and projects your pixel-art skin over the
+   pawn as you move through Pandora. Press **F5** again to return to first person/HUD-doll mode.
 
 This slice deliberately uses BL2 movement and a Canvas paper doll. Minecraft-authoritative movement,
 3D world geometry, inventory, block interaction and combat are not implemented yet.
