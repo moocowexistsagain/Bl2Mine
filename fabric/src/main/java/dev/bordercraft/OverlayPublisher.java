@@ -2,8 +2,8 @@
 //
 // Each frame, copy Minecraft's framebuffer into the shared-memory overlay double buffer so
 // BL2's compositor can draw it inside the Borderlands window. The publish path (pixel copy +
-// slot swap) is real and protocol-tested; the GL readback is the one place that needs in-game
-// verification against your Yarn/Minecraft version (see the TODO below).
+// slot swap) is real and protocol-tested; the GL readback still needs in-game verification
+// against the target Minecraft/Yarn version.
 package dev.bordercraft;
 
 import dev.bordercraft.link.SharedMemory;
@@ -13,11 +13,11 @@ import org.lwjgl.opengl.GL11;
 import java.nio.ByteBuffer;
 
 public final class OverlayPublisher {
-    private final SharedMemory sm;
+    private final SharedMemory.Overlay overlay;
     private ByteBuffer scratch;
 
     public OverlayPublisher(SharedMemory sm) {
-        this.sm = sm;
+        this.overlay = sm.overlay();
     }
 
     /** Capture the current frame and publish it. Call once per rendered frame (client thread). */
@@ -34,14 +34,13 @@ public final class OverlayPublisher {
         scratch.clear();
         scratch.limit(need);
 
-        // TODO(Phase 1a, verify in-game): read the framebuffer's color attachment.
-        // Exact calls depend on your Yarn mapping - you want the GL_READ_FRAMEBUFFER bound to
-        // client.getFramebuffer()'s fbo, then glReadPixels(0, 0, w, h, GL_BGRA, UNSIGNED_BYTE).
-        // GL's origin is bottom-left, so the frame is published bottom-up (flag bit0 = 1).
+        // The HUD render callback runs after Minecraft's in-world HUD has drawn. Bind the main
+        // framebuffer explicitly so the readback does not depend on whatever target a HUD mod
+        // left bound. GL's origin is bottom-left, so publish bottom-up (flag bit0 = 1).
         client.getFramebuffer().beginWrite(false);
         GL11.glReadPixels(0, 0, w, h, GL11.GL_BGRA, GL11.GL_UNSIGNED_BYTE, scratch);
         scratch.limit(need).position(0);
 
-        return sm.overlay().publish(w, h, scratch, true);
+        return overlay.publish(w, h, scratch, true);
     }
 }

@@ -9,7 +9,11 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-import bordercraft_protocol as P
+try:
+    from . import bordercraft_protocol as P
+except ImportError:
+    # Development checkout: the packaged sibling lives at protocol/python/.
+    import bordercraft_protocol as P
 
 from .render import OverlayCompositor
 

@@ -6,7 +6,11 @@ them inside the Borderlands 2 window. The acquire path is real and protocol-test
 """
 from __future__ import annotations
 
-import bordercraft_protocol as P
+try:
+    from . import bordercraft_protocol as P
+except ImportError:
+    # Development checkout: the packaged sibling lives at protocol/python/.
+    import bordercraft_protocol as P
 
 
 class OverlayCompositor:
