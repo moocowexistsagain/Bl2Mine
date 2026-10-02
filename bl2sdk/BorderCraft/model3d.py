@@ -280,6 +280,11 @@ class ModelRenderer:
         self.renders_completed = 0
         self.faces_drawn = 0
 
+    @property
+    def pending(self) -> bool:
+        """True while a rasterization is part-way through; :meth:`step` still has work."""
+        return bool(self._queue)
+
     # -- sizing ---------------------------------------------------------------------------
     def resize(self, height: int) -> None:
         height = max(16, int(height))

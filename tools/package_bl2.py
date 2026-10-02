@@ -25,6 +25,12 @@ REQUIRED_FILES = (
     "__init__.py",
     "host.py",
     "render.py",
+    "raster.py",
+    "model3d.py",
+    "voxel.py",
+    "hud.py",
+    "inputmap.py",
+    "collision.py",
     "pyproject.toml",
     "bordercraft_protocol.py",
 )

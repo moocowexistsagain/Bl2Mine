@@ -138,7 +138,31 @@ def bl2_side(path: str) -> None:
     print("[bl2 ] teleport handshake ok")
     ok += 1
 
-    # 9. overlay frames: acquire and validate what "Minecraft" rendered
+    # 9. the v2 gameplay regions: everything the overlay needs to draw Minecraft in Pandora
+    pose = wait_until(lambda: (lambda p: p if p and p.limb_swing_amount > 0 else None)(br.read_pose()),
+                      "pose")
+    assert pose.flags & P.POSE_SLIM and abs(pose.body_yaw - 90.0) < 1e-3, f"bad pose: {pose}"
+    assert abs(pose.head_yaw - 100.0) < 1e-3 and abs(pose.limb_swing - 4.25) < 1e-3
+    hud = wait_until(lambda: (lambda h: h if h and h.slots else None)(br.read_hud()), "HUD")
+    assert len(hud.slots) == 41, f"expected 41 inventory slots, got {len(hud.slots)}"
+    assert hud.selected_slot == 4 and hud.slots[4].flags & P.SLOT_SELECTED
+    assert hud.slots[7].name == "Slot 7", f"slot name round trip failed: {hud.slots[7].name!r}"
+    assert abs(hud.health - 15.5) < 1e-3 and hud.xp_level == 24
+    blocks = wait_until(lambda: (lambda b: b if b and b[0] else None)(br.read_blocks()), "blocks")
+    entries, world_id, revision = blocks
+    assert len(entries) == 49 and world_id == 0xBEEF and revision == 11
+    assert any(e.flags & P.BLOCK_FULL_CUBE for e in entries)
+    print(f"[bl2 ] gameplay regions ok (pose yaw {pose.body_yaw:.0f}, {len(hud.slots)} slots, "
+          f"{len(entries)} blocks)")
+    ok += 1
+
+    # 10. damage flowing the other way: a bandit shoots the Minecraft player.
+    wait_until(lambda: br.push_bl2_event(P.McEvent(
+        type=P.EVT_BL2_DAMAGE_PLAYER, flags=P.DAMAGE_GUN, a=3.5)), "bl2 damage push")
+    wait_until(lambda: br.push_bl2_event(P.McEvent(
+        type=P.EVT_BL2_ACTOR_DIED, actor_id=9)), "bl2 death push")
+
+    # 11. overlay frames: acquire and validate what "Minecraft" rendered
     seen: dict[int, bool] = {}
 
     def got_frame():
@@ -229,6 +253,36 @@ def mc_side(path: str) -> None:
 
     wait_until(apply_teleport, "teleport request")
     print("[mc  ] teleport applied")
+
+    # v2 gameplay regions: the pose that drives the 3D model, the whole HUD/inventory, and
+    # the blocks the player has placed.
+    br.write_pose(P.PoseState(
+        flags=P.POSE_SLIM | P.POSE_ON_GROUND, body_yaw=90.0, head_yaw=100.0, head_pitch=-12.0,
+        limb_swing=4.25, limb_swing_amount=0.9, hand_swing=0.25, sneak_amount=0.0,
+        scale=1.0, vel_x=0.21, vel_y=-0.08, vel_z=0.0, held_main_rgb=0x7FBF3F,
+    ))
+    br.write_hud(P.HudState(
+        flags=0, health=15.5, max_health=20.0, armor=8.0, food=17.0, saturation=3.5,
+        air=300.0, max_air=300.0, xp_level=24, xp_progress=0.75, selected_slot=4,
+        slots=[P.HudSlot(item_hash=0x1000 + i, count=(i % 64) + 1, rgb=0x8B6A4F + i * 7,
+                         flags=P.SLOT_BLOCK | (P.SLOT_SELECTED if i == 4 else 0),
+                         damage=0, name=f"Slot {i}")
+               for i in range(41)],
+    ))
+    br.write_blocks([P.BlockEntry(x, 64, z, 180, 170, 160, P.BLOCK_FULL_CUBE)
+                     for x in range(-3, 4) for z in range(-3, 4)],
+                    world_id=0xBEEF, revision=11)
+    print("[mc  ] published pose, HUD (41 slots) and 49 blocks")
+
+    # BL2 -> MC damage: the bandit's bullet, expressed in Minecraft half-hearts.
+    hits = wait_until(lambda: [e for e in _drain(br.pop_bl2_event)] or None, "BL2 damage events")
+    assert len(hits) == 2, f"expected 2 BL2 events, got {len(hits)}"
+    shot = next(e for e in hits if e.type == P.EVT_BL2_DAMAGE_PLAYER)
+    died = next(e for e in hits if e.type == P.EVT_BL2_ACTOR_DIED)
+    assert shot.flags == P.DAMAGE_GUN and abs(shot.a - 3.5) < 1e-3, f"bad damage event: {shot}"
+    assert died.actor_id == 9, f"bad death event: {died}"
+    print(f"[mc  ] bl2 events ok ({shot.a} hearts of {shot.flags} damage, actor "
+          f"{died.actor_id} died)")
 
     # overlay: publish 30 rendered frames (MC renders -> BL2 composites)
     for fid in range(1, 31):

@@ -126,7 +126,9 @@ WHEEL_NAMES = {"MOUSESCROLLUP": 1, "MOUSESCROLLDOWN": -1}
 AXIS_NAMES = {"MOUSEX": 0, "MOUSEY": 1}
 
 # Borderlands 2 keeps these: its menus, map, console and the BorderCraft view toggle.
-BL2_RESERVED = frozenset({"ESCAPE", "TAB", "F", "TILDE", "F5", "F10", "ALT", "F4"})
+BL2_RESERVED = frozenset({"ESCAPE", "TAB", "F", "TILDE", "F10", "ALT", "F4",
+                          # BorderCraft's own toggles: avatar, physics authority, HUD.
+                          "F5", "F6", "F7"})
 
 # UE3 input event ids.
 IE_PRESSED, IE_RELEASED, IE_REPEAT, IE_DOUBLECLICK, IE_AXIS = 0, 1, 2, 3, 4

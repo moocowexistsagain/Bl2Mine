@@ -180,10 +180,14 @@ public final class BlockMirror {
         lock.endWrite(seq);
     }
 
+    /**
+     * The actor-id field carries the packed RGB for block events: the BL2 voxel field reads it
+     * there (bl2sdk/BorderCraft/voxel.py, BlockField.apply_event) so a freshly placed block is
+     * drawn on the very next frame, without waiting for the next full table.
+     */
     private void pushEvent(int type, int x, int y, int z, int packed) {
-        SharedMemory.pushEvent(sm.eventRing(), eventScratch, type, (packed >>> 24) & 0xFF, 0,
-                ((packed >> 16) & 0xFF) / 255.0f, ((packed >> 8) & 0xFF) / 255.0f,
-                (packed & 0xFF) / 255.0f, x + 0.5f, y + 0.5f, z + 0.5f);
+        SharedMemory.pushEvent(sm.eventRing(), eventScratch, type, (packed >>> 24) & 0xFF,
+                packed & 0xFFFFFF, 0.0f, 0.0f, 0.0f, x, y, z);
     }
 
     private static double distanceSq(long key, double px, double py, double pz) {
