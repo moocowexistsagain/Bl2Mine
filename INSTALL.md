@@ -4,10 +4,11 @@ You own both games: **Borderlands 2 (PC)** and **Minecraft Java Edition**. The B
 `release/` is ready to install, and the prebuilt Minecraft jar targets **Minecraft 1.21.1** (Fabric).
 ~10 minutes.
 
-> **What this install gets you:** a visible, controllable first slice. Open both games and a
-> Minecraft world; your active Minecraft skin appears as a pixel-art avatar at the lower-right of
-> Borderlands 2. Move normally in BL2 and its limbs animate with your pawn. This is not yet the full
-> Minecraft-physics/block/combat bridge. Backup your saves anyway.
+> **What this install gets you:** the full crossover. Open both games and a Minecraft world; you
+> walk Pandora as a Minecraft player — Minecraft's movement physics, gravity and step-up on
+> Pandora's terrain, its hearts/hunger/hotbar and inventory drawn over the BL2 window, real block
+> placing and breaking, and Minecraft weapons that work on bandits and wildlife (they fight back).
+> Expect rough edges, and back up your saves anyway.
 
 ---
 
@@ -59,18 +60,19 @@ You own both games: **Borderlands 2 (PC)** and **Minecraft Java Edition**. The B
 ## Expected result
 
 1. Keep Minecraft open in a world, then load a BL2 save (either game may be started first).
-2. BL2's MODS menu shows BorderCraft enabled and `bridge.mm` exists in
-   `%LOCALAPPDATA%\BorderCraft\`.
-3. Minecraft's log shows `BorderCraft: bridge open at ...`, followed by
-   `BorderCraft: published player skin ...` after the world loads.
-4. Your Minecraft skin appears at the lower-right of the BL2 viewport. Walk in BL2 with its normal
-   controls and the avatar's arms/legs swing. Wide (Steve) and slim (Alex) arm layouts are handled.
-5. Press **F5** in gameplay to toggle the controllable world view. BorderCraft switches BL2 to third
-   person, hides the normal pawn mesh where supported, and projects your pixel-art skin over the
-   pawn as you move through Pandora. Press **F5** again to return to first person/HUD-doll mode.
-
-This slice deliberately uses BL2 movement and a Canvas paper doll. Minecraft-authoritative movement,
-3D world geometry, inventory, block interaction and combat are not implemented yet.
+2. BL2's MODS menu shows BorderCraft enabled, `bridge.mm` exists in
+   `%LOCALAPPDATA%\BorderCraft\`, and `Documents\My Games\Borderlands 2\WillowGame\Logs\Launch.log`
+   shows a `[BorderCraft] bridge up ...` line.
+3. Minecraft's log shows `BorderCraft: bridge open at ...`. If the games are not connecting, the
+   log instead repeats a `BorderCraft: bridge not ready ...` line naming the exact reason —
+   match it against the Troubleshooting table below.
+4. In game you are the Minecraft player: WASD / Space / Shift move with Minecraft's own physics on
+   Pandora's terrain, the hearts/hunger/armour/XP HUD and hotbar are drawn over the BL2 window,
+   and **E** opens the Minecraft inventory. Left/right mouse attack and use — on blocks, and on
+   Pandora's pawns.
+5. **F5** toggles the projected third-person avatar, **F6** hands movement authority back to
+   Borderlands 2 (and back to Minecraft), **F7** toggles the Minecraft HUD and inventory overlay.
+   **Esc / Tab / F / ~** always stay with Borderlands 2.
 
 ## Troubleshooting
 
@@ -80,11 +82,14 @@ This slice deliberately uses BL2 movement and a Canvas paper doll. Minecraft-aut
 | MODS menu has no BorderCraft | Check that `BorderCraft.sdkmod` is directly in `sdk_mods\` (do not unzip it). For the legacy ZIP, extract its single `BorderCraft` folder directly into `sdk_mods\`; avoid double nesting. Restart the game after installing. |
 | BL2 log reports a Python import error | Reinstall the complete `.sdkmod` or legacy ZIP from `release/`; both packages include the protocol module. |
 | BL2 log says `could not start bridge` with `[Errno 22] Invalid argument` | Replace the BL2 package with the current `release\BorderCraft.sdkmod` (or legacy ZIP) and restart BL2. Older packages always truncated `bridge.mm`, which Windows rejects if Minecraft still maps it. See **Windows bridge startup errors** below if it persists. |
-| MC log says `bad magic` / `protocol version` | Stale bridge from an older build: close both games, delete `%LOCALAPPDATA%\BorderCraft\bridge.mm`, start again. |
+| MC log shows `BorderCraft: starting bridge client` but never `BorderCraft: bridge open at ...` | The games never connected. Minecraft now logs a `BorderCraft: bridge not ready at ...` line naming the exact reason — match it to the rows below. |
+| MC log repeats `bridge not ready ... bridge file does not exist yet` | The BL2 side is not running the mod: BL2 is closed, or BorderCraft is disabled/errored in its MODS menu. Check `Launch.log` for `[BorderCraft] bridge up` or a Python error. |
+| MC log repeats `bridge not ready ... bridge too small` or `protocol version X != 2` | **The installed BL2 package is from an older BorderCraft build** (this exact mismatch shipped before the fix): replace `sdk_mods\BorderCraft.sdkmod` with the current `release\BorderCraft.sdkmod` (or the current legacy ZIP), restart BL2. If it persists: close both games, delete `%LOCALAPPDATA%\BorderCraft\bridge.mm`, start again. |
+| MC log says `bad magic` | Stale or foreign `bridge.mm`: close both games, delete `%LOCALAPPDATA%\BorderCraft\bridge.mm`, start again. |
 | MC log shows nothing about BorderCraft | The jar isn't in `mods\`, or you launched a non-Fabric profile. |
-| Bridge opens but no skin appears | Keep an MC world loaded (not just the title screen), verify the `published player skin` log line, and replace both BorderCraft packages with the current files in `release\`. |
-| Skin is Steve/Alex instead of your account skin | Minecraft has not downloaded your authenticated skin yet. Confirm the launcher is online and signed into the intended account; leave the world open for a few seconds while BorderCraft retries. |
-| Skin appears but does not move around the world | Expected in this slice: it is a lower-right paper doll whose limbs track BL2 movement. In-world 3D replacement is a later milestone. |
+| Bridge opens but no Minecraft visuals appear in BL2 | Keep an MC world loaded (not just the title screen) and a BL2 save in gameplay (not the main menu), verify the `published player skin` log line, and confirm both sides use the current packages from `release\`. Press **F7** — the Minecraft HUD overlay toggles, and may simply be off. |
+| Avatar skin is Steve/Alex instead of your account skin | Minecraft has not downloaded your authenticated skin yet. Confirm the launcher is online and signed into the intended account; leave the world open for a few seconds while BorderCraft retries. |
+| BL2 keyboard keys also do things in Minecraft while BL2 menus are open | Not expected — the bridge releases held keys on BL2 menus. Report which key and which menu. |
 | MC crashes on startup | Check `latest.log` — if it's a mod conflict, try with only Fabric API + BorderCraft in `mods\`. |
 | MC crashes on startup with `ExceptionInInitializerError ... not an array: int` (or a `WrongMethodTypeException` mentioning `SharedMemory`) | You have a broken pre-fix `bordercraft-0.1.0.jar`. Delete it and copy the current `release\bordercraft-0.1.0.jar` (same filename, fixed contents) into `mods\`. |
 | Wrong Minecraft version | The jar is for 1.21.1. For another version: edit `fabric/gradle.properties`, run `gradlew build` (needs JDK 21), replace the jar. |

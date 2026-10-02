@@ -43,20 +43,31 @@ public final class SharedMemory implements AutoCloseable {
 
     /** Open an existing mapping. Minecraft side. */
     public static SharedMemory open(Path path) throws IOException {
+        // This side must never create the bridge file: RandomAccessFile("rw") would materialize
+        // an empty bridge.mm while BL2 is not running, leaving a poisoned zero-length file that
+        // the BL2 side then has to repair. Check before touching it.
+        if (!Files.isRegularFile(path)) {
+            throw new IOException("bridge file does not exist yet "
+                    + "(start Borderlands 2 and enable BorderCraft in its MODS menu)");
+        }
+        long size = Files.size(path);
+        // BL2 truncates the file to the full size before it writes the magic header, so a
+        // short or half-created bridge is a retryable error here - never a crash mid-tick. A
+        // short bridge also means an older BL2 package whose mapping predates this protocol.
+        if (size < Proto.MAPPING_BYTES) {
+            throw new IOException("bridge too small: " + size + " < " + Proto.MAPPING_BYTES
+                    + " (stale or half-created bridge; close both games, delete " + path
+                    + ", and restart with the matching BL2 package from release/)");
+        }
         try (RandomAccessFile f = new RandomAccessFile(path.toFile(), "rw")) {
-            long size = f.length();
-            // BL2 truncates the file to the full size before it writes the magic header, so a
-            // short or half-created bridge is a retryable error here - never a crash mid-tick.
-            if (size < Proto.MAPPING_BYTES) {
-                throw new IOException("bridge too small: " + size + " < " + Proto.MAPPING_BYTES);
-            }
             FileChannel ch = f.getChannel();
             ByteBuffer buf = ch.map(FileChannel.MapMode.READ_WRITE, 0, size);
             SharedMemory sm = new SharedMemory(buf.order(ByteOrder.LITTLE_ENDIAN), ch);
             int magic = sm.buf.getInt((int) Proto.OFF_HEADER);
             int version = sm.buf.getInt((int) Proto.OFF_HEADER + 4);
             if (magic != Proto.MAGIC) throw new IOException("bad magic " + Integer.toHexString(magic));
-            if (version != Proto.VERSION) throw new IOException("protocol version " + version + " != " + Proto.VERSION);
+            if (version != Proto.VERSION) throw new IOException("protocol version " + version + " != " + Proto.VERSION
+                    + " (the BL2 mod is a different BorderCraft build; replace it with the package from release/)");
             return sm;
         }
     }
