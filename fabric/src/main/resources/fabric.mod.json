@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "bordercraft",
+  "version": "${version}",
+  "name": "BorderCraft",
+  "description": "Play Borderlands 2 as a Minecraft player. Minecraft's physics, inventory, blocks and combat inside Pandora, bridged over shared memory.",
+  "authors": ["BorderCraft contributors"],
+  "contact": {},
+  "license": "All rights reserved (fan project)",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["dev.bordercraft.BorderCraftMod"]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.1",
+    "java": ">=21"
+  }
+}
